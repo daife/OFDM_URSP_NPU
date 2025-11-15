@@ -15,9 +15,24 @@ batch = 1
 n_data = 48
 n_total = 64
 pilot_indices = [11, 25, 39, 53]
-data_indices = [i for i in range(n_total) if i not in pilot_indices][:n_data]
 
-bits = np.random.randint(0, 2, (batch, n_data * 6), dtype=np.uint8)
+data_subcarrier_ranges = [
+    range(-26, -21),
+    range(-20, -7),
+    range(-6, 0),
+    range(1, 7),
+    range(8, 21),
+    range(22, 27),
+]
+def subcarrier_num_to_index(num):
+    return num + 32
+
+data_indices = []
+for r in data_subcarrier_ranges:
+    data_indices.extend([subcarrier_num_to_index(i) for i in r])
+data_indices = [i for i in data_indices if i not in pilot_indices and i != 32]
+
+bits = np.random.randint(0, 2, (batch, len(data_indices) * 6), dtype=np.uint8)
 mod_data = qam64_mod(bits[0])  # (48,)
 
 freq = np.zeros((batch, 2, n_total), dtype=np.float32)
