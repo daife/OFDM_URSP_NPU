@@ -27,11 +27,9 @@ freq[0, 1, data_indices] = np.imag(mod_data)
 gen_sess = ort.InferenceSession("ofdm_generator.onnx", providers=['CPUExecutionProvider'])
 proc_sess = ort.InferenceSession("ofdm_process.onnx", providers=['CPUExecutionProvider'])
 
-# 1. 生成OFDM时域信号
-ofdm_time = gen_sess.run(None, {"input": freq})[0]  # (1, 1, 64)
+ofdm_time = gen_sess.run(None, {"input": freq})[0]  # (1, 2, 64)
 
-# 2. 作为解析器输入，直接使用 (1, 1, 64)
-ofdm_time_input = ofdm_time.astype(np.float32)  # (1, 1, 64)
+ofdm_time_input = ofdm_time.astype(np.float32)  # (1, 2, 64)
 eq_out = proc_sess.run(None, {"input": ofdm_time_input})[0]  # (1, 2, 64)
 
 eq_data = eq_out[:, :, data_indices]  # (1, 2, 48)

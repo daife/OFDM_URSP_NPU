@@ -20,18 +20,19 @@ data_indices = [i for i in range(n_total) if i not in pilot_indices][:n_data]
 bits = np.random.randint(0, 2, (batch, n_data * 6), dtype=np.uint8)
 mod_data = qam64_mod(bits[0])  # (48,)
 
-# 构造频域数据，插入导频
 freq = np.zeros((n_total,), dtype=np.complex64)
 freq[data_indices] = mod_data
 freq[pilot_indices] = 1.0 + 0j  # 导频
 
 # numpy IFFT 得到时域信号
 ifft_np = np.fft.ifft(freq, n=n_total)
-ifft_np_real = np.real(ifft_np).reshape(1, 1, n_total).astype(np.float32)  # (1, 1, 64)
+ifft_np_real = np.real(ifft_np).reshape(1, n_total)
+ifft_np_imag = np.imag(ifft_np).reshape(1, n_total)
+ifft_np_full = np.stack([ifft_np_real, ifft_np_imag], axis=1).astype(np.float32)  # (1, 2, 64)
 
 # ONNX模型推理
 proc_sess = ort.InferenceSession("ofdm_process.onnx", providers=['CPUExecutionProvider'])
-ofdm_time_input = ifft_np_real.astype(np.float32)  # (1, 1, 64)
+ofdm_time_input = ifft_np_full.astype(np.float32)  # (1, 2, 64)
 eq_out = proc_sess.run(None, {"input": ofdm_time_input})[0]  # (1, 2, 64)
 
 eq_data = eq_out[:, :, data_indices]  # (1, 2, 48)

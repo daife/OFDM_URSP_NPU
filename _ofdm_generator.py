@@ -27,9 +27,12 @@ class ComplexIFFT(nn.Module):
         # x: (batch, 2, 64)
         x_real = x[:, 0:1, :]  # (batch, 1, 64)
         x_imag = x[:, 1:2, :]
-        out_real = self.real_conv(x_real) - self.imag_conv(x_imag)  # (batch, fft_len, 1)
+        out_real = self.real_conv(x_real) - self.imag_conv(x_imag)  # (batch, 64, 1)
+        out_imag = self.real_conv(x_imag) + self.imag_conv(x_real)  # (batch, 64, 1)
         out_real = out_real.permute(0, 2, 1)  # (batch, 1, 64)
-        return out_real  # 时域实数 (batch, 1, 64)
+        out_imag = out_imag.permute(0, 2, 1)  # (batch, 1, 64)
+        out = torch.cat([out_real, out_imag], dim=1)  # (batch, 2, 64)
+        return out  # 时域复数信号 (batch, 2, 64)
 
 # ----------- 导频插入 -----------
 def insert_pilots(data_freq):
@@ -49,7 +52,7 @@ def generate_ofdm_symbol(eq_freq):
     # eq_freq: (batch, 2, 64)
     freq_with_pilots = insert_pilots(eq_freq.clone())  # 插入导频
     ifft_model = ComplexIFFT(64)
-    time_samples = ifft_model(freq_with_pilots)  # (batch, 1, 64)
+    time_samples = ifft_model(freq_with_pilots)  # (batch, 2, 64)
     return time_samples  # 时域信号（无CP）
 
 class OFDMGeneratorModule(nn.Module):
@@ -61,7 +64,7 @@ class OFDMGeneratorModule(nn.Module):
         # eq_freq: (batch, 2, 64)
         freq_with_pilots = insert_pilots(eq_freq.clone())
         time_samples = self.ifft_model(freq_with_pilots)
-        return time_samples  # (batch, 1, 64)
+        return time_samples  # (batch, 2, 64)
 
 # 导出ONNX模型
 if __name__ == "__main__":

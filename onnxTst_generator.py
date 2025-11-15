@@ -20,14 +20,15 @@ data_indices = [i for i in range(n_total) if i not in pilot_indices][:n_data]
 bits = np.random.randint(0, 2, (batch, n_data * 6), dtype=np.uint8)
 mod_data = qam64_mod(bits[0])  # (48,)
 
-# 构造频域数据，插入导频
 freq = np.zeros((n_total,), dtype=np.complex64)
 freq[data_indices] = mod_data
 freq[pilot_indices] = 1.0 + 0j  # 导频
 
 # numpy IFFT
 ifft_np = np.fft.ifft(freq, n=n_total)
-ifft_np_real = np.real(ifft_np).reshape(1, 1, n_total).astype(np.float32)  # (1, 1, 64)
+ifft_np_real = np.real(ifft_np).reshape(1, n_total)
+ifft_np_imag = np.imag(ifft_np).reshape(1, n_total)
+ifft_np_full = np.stack([ifft_np_real, ifft_np_imag], axis=1).astype(np.float32)  # (1, 2, 64)
 
 # ONNX模型推理
 freq_onnx = np.zeros((1, 2, n_total), dtype=np.float32)
@@ -35,10 +36,10 @@ freq_onnx[0, 0, :] = np.real(freq)
 freq_onnx[0, 1, :] = np.imag(freq)
 
 gen_sess = ort.InferenceSession("ofdm_generator.onnx", providers=['CPUExecutionProvider'])
-ofdm_time_onnx = gen_sess.run(None, {"input": freq_onnx})[0]  # (1, 1, 64)
+ofdm_time_onnx = gen_sess.run(None, {"input": freq_onnx})[0]  # (1, 2, 64)
 
 # 对比
-mse = np.mean((ifft_np_real.flatten() - ofdm_time_onnx.flatten())**2)
+mse = np.mean((ifft_np_full.flatten() - ofdm_time_onnx.flatten())**2)
 print(f"均方误差: {mse:.8f}")
-print("numpy IFFT输出（前10）:", ifft_np_real.flatten()[:10])
+print("numpy IFFT输出（前10）:", ifft_np_full.flatten()[:10])
 print("ONNX模型输出（前10）:", ofdm_time_onnx.flatten()[:10])

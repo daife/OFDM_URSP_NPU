@@ -25,11 +25,14 @@ class OneSidedComplexFFT(nn.Module):
         self.imag_conv.weight.requires_grad = False
 
     def forward(self, x):
-        # x: (batch, 1, fft_len)
-        real_part = self.real_conv(x)  # (batch, fft_bins, 1)
-        imag_part = self.imag_conv(x)  # (batch, fft_bins, 1)
-        out = torch.cat([real_part, imag_part], dim=1)  # (batch, 2*fft_bins, 1)
-        out = out.view(x.size(0), 2, self.fft_bins)  # (batch, 2, fft_bins)
+        # x: (batch, 2, 64)
+        x_real = x[:, 0:1, :]  # (batch, 1, 64)
+        x_imag = x[:, 1:2, :]
+        real_part = self.real_conv(x_real) - self.imag_conv(x_imag)  # (batch, 64, 1)
+        imag_part = self.real_conv(x_imag) + self.imag_conv(x_real)  # (batch, 64, 1)
+        real_part = real_part.permute(0, 2, 1)  # (batch, 1, 64)
+        imag_part = imag_part.permute(0, 2, 1)  # (batch, 1, 64)
+        out = torch.cat([real_part, imag_part], dim=1)  # (batch, 2, 64)
         return out  # (batch, 2, 64)
 
 # ----------- 导频提取 -----------
@@ -70,13 +73,10 @@ def channel_equalization(fft_out, h_est):
 
 # ----------- 主流程示例 -----------
 def process_ofdm_symbol(ofdm_samples):
-    # ofdm_samples: (batch, 64), np.complex64
-    x_real = torch.from_numpy(ofdm_samples.real).float().unsqueeze(1)  # (batch, 1, 64)
-    # x_imag = torch.from_numpy(ofdm_samples.imag).float().unsqueeze(1)
-    # x = x_real + 1j * x_imag
-
+    # ofdm_samples: (batch, 2, 64), np.float32
+    x = torch.from_numpy(ofdm_samples).float()
     fft_model = OneSidedComplexFFT(64)
-    fft_out = fft_model(x_real)  # (batch, 2, 64)
+    fft_out = fft_model(x)  # (batch, 2, 64)
 
     pilots = extract_pilots(fft_out)  # (batch, 4, 2)
     h_est = channel_estimation(pilots)  # (batch, 2, 64)
@@ -89,19 +89,18 @@ class OFDMProcessModule(nn.Module):
         super().__init__()
         self.fft_model = OneSidedComplexFFT(64)
 
-    def forward(self, x_real):
-        # x_real: (batch, 1, 64)
-        fft_out = self.fft_model(x_real)  # (batch, 2, 64)
-        # pilots = extract_pilots(fft_out)
-        # h_est = channel_estimation(pilots)
-        # eq_out = channel_equalization(fft_out, h_est)
-        # return eq_out  # (batch, 2, 64)
-        return fft_out  # (batch, 2, 64)
+    def forward(self, x):
+        # x: (batch, 2, 64)
+        fft_out = self.fft_model(x)  # (batch, 2, 64)
+        pilots = extract_pilots(fft_out)
+        h_est = channel_estimation(pilots)
+        eq_out = channel_equalization(fft_out, h_est)
+        return eq_out  # (batch, 2, 64)
 
 # 导出ONNX模型
 if __name__ == "__main__":
     model = OFDMProcessModule()
-    dummy_input = torch.randn(1, 1, 64)  # batch=1，实部输入
+    dummy_input = torch.randn(1, 2, 64)  # batch=1，实部输入
     torch.onnx.export(
         model,
         (dummy_input,),
