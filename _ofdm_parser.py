@@ -40,15 +40,16 @@ def extract_pilots(fft_out):
 # ----------- 信道估计（插值补全） -----------
 def channel_estimation(pilots):
     # pilots: (batch, 4, 2)
-    # 简单线性插值，实际可用更复杂方法
     batch = pilots.shape[0]
     h_est = torch.zeros((batch, 64, 2), dtype=pilots.dtype)
     pilot_pos = [11, 25, 39, 53]
+
+    # 插值区间
     for i in range(3):
         start, end = pilot_pos[i], pilot_pos[i+1]
-        for b in range(batch):
-            h_est[b, start:end+1, :] = torch.linspace(0, 1, end-start+1).unsqueeze(-1) * pilots[b, i+1, :] + \
-                                       torch.linspace(1, 0, end-start+1).unsqueeze(-1) * pilots[b, i, :]
+        alpha = torch.linspace(0, 1, end - start + 1, device=pilots.device).unsqueeze(0).unsqueeze(-1)  # (1, L, 1)
+        h_est[:, start:end+1, :] = alpha * pilots[:, i+1, :].unsqueeze(1) + (1 - alpha) * pilots[:, i, :].unsqueeze(1)
+
     # 两端补齐
     h_est[:, :pilot_pos[0], :] = pilots[:, 0, :].unsqueeze(1)
     h_est[:, pilot_pos[-1]:, :] = pilots[:, -1, :].unsqueeze(1)
