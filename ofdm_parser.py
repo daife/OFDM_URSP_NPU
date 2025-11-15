@@ -111,5 +111,5 @@ if __name__ == "__main__":
         "ofdm_process.onnx",
         input_names=["input"],
         output_names=["output"],
-        opset_version=16,
+        opset_version=18,
     )
