@@ -10,3 +10,4 @@ def strip_op_type_prefix(model_path, output_path):
 
 if __name__ == "__main__":
     strip_op_type_prefix("ofdm_process.onnx", "ofdm_process_noprefix.onnx")
+    strip_op_type_prefix("ofdm_generator.onnx", "ofdm_generator_noprefix.onnx")
