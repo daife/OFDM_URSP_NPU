@@ -34,17 +34,14 @@ class ComplexIFFT(nn.Module):
         out = torch.cat([out_real, out_imag], dim=1)  # (batch, 2, 64)
         return out  # 时域复数信号 (batch, 2, 64)
 
-# ----------- 导频插入 -----------
+# ----------- 导频插入 ----------- 
 def insert_pilots(data_freq):
     # data_freq: (batch, 2, 64)
     pilot_indices = torch.tensor([11, 25, 39, 53], dtype=torch.long, device=data_freq.device)
     pilot_value = torch.tensor([1.0, 0.0], dtype=data_freq.dtype, device=data_freq.device)
-    pilot_value = pilot_value.unsqueeze(0).unsqueeze(0).expand(data_freq.size(0), pilot_indices.size(0), 2)
     out = data_freq.clone()
-    # 交换维度以便 scatter
-    out = out.permute(0, 2, 1)  # (batch, 64, 2)
-    out.scatter_(1, pilot_indices.unsqueeze(0).unsqueeze(-1).expand(data_freq.size(0), pilot_indices.size(0), 2), pilot_value)
-    out = out.permute(0, 2, 1)  # (batch, 2, 64)
+    # 向量化赋值
+    out[:, :, pilot_indices] = pilot_value.view(2, 1).expand(2, pilot_indices.size(0))
     return out
 
 # ----------- 主流程示例 -----------
