@@ -1,5 +1,6 @@
 import numpy as np
 import onnxruntime as ort
+import time
 
 def qam64_mod(bits):
     bits = bits.reshape(-1, 6)
@@ -42,10 +43,16 @@ freq[0, 1, data_indices] = np.imag(mod_data)
 gen_sess = ort.InferenceSession("ofdm_generator_noprefix_sim.onnx", providers=['CPUExecutionProvider'])
 proc_sess = ort.InferenceSession("ofdm_process_noprefix_sim.onnx", providers=['CPUExecutionProvider'])
 
+start_gen = time.time()
 ofdm_time = gen_sess.run(None, {"input": freq})[0]  # (1, 2, 64)
+end_gen = time.time()
+print(f"生成器模型推理耗时: {end_gen - start_gen:.6f} 秒")
 
 ofdm_time_input = ofdm_time.astype(np.float32)  # (1, 2, 64)
+start_proc = time.time()
 eq_out = proc_sess.run(None, {"input": ofdm_time_input})[0]  # (1, 2, 64)
+end_proc = time.time()
+print(f"处理器模型推理耗时: {end_proc - start_proc:.6f} 秒")
 
 eq_data = eq_out[:, :, data_indices]  # (1, 2, 48)
 eq_data_complex = eq_data[0, 0, :] + 1j * eq_data[0, 1, :]
