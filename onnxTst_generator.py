@@ -53,7 +53,7 @@ freq_onnx = np.zeros((1, 2, n_total), dtype=np.float32)
 freq_onnx[0, 0, :] = np.real(freq)
 freq_onnx[0, 1, :] = np.imag(freq)
 
-gen_sess = ort.InferenceSession("ofdm_generator.onnx", providers=['CPUExecutionProvider'])
+gen_sess = ort.InferenceSession("ofdm_generator_noprofix_sim.onnx", providers=['CPUExecutionProvider'])
 ofdm_time_onnx = gen_sess.run(None, {"input": freq_onnx})[0]  # (1, 2, 64)
 
 # 对比

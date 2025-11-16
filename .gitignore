@@ -1,0 +1,5 @@
+# 忽略四个ONNX文件
+ofdm_generator.onnx
+ofdm_generator_noprefix.onnx
+ofdm_process.onnx
+ofdm_process_noprefix.onnx
