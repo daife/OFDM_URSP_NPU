@@ -1,7 +1,11 @@
-# 忽略不必要ONNX文件
+# 忽略不必要的文件
 ofdm_generator.onnx
 ofdm_generator.onnx.data
 ofdm_generator_noprefix.onnx
 ofdm_process.onnx
 ofdm_process.onnx.data
 ofdm_process_noprefix.onnx
+#文件夹
+kernel_meta/
+fusion_result.json
+ofdm_generator.om
