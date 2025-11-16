@@ -46,7 +46,7 @@ ifft_np_imag = np.imag(ifft_np).reshape(1, n_total)
 ifft_np_full = np.stack([ifft_np_real, ifft_np_imag], axis=1).astype(np.float32)  # (1, 2, 64)
 
 # ONNX模型推理
-proc_sess = ort.InferenceSession("ofdm_process_noprofix_sim.onnx", providers=['CPUExecutionProvider'])
+proc_sess = ort.InferenceSession("ofdm_process_noprefix_sim.onnx", providers=['CPUExecutionProvider'])
 ofdm_time_input = ifft_np_full.astype(np.float32)  # (1, 2, 64)
 eq_out = proc_sess.run(None, {"input": ofdm_time_input})[0]  # (1, 2, 64)
 

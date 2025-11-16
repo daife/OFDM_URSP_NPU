@@ -39,8 +39,8 @@ freq = np.zeros((batch, 2, n_total), dtype=np.float32)
 freq[0, 0, data_indices] = np.real(mod_data)
 freq[0, 1, data_indices] = np.imag(mod_data)
 
-gen_sess = ort.InferenceSession("ofdm_generator_noprofix_sim.onnx", providers=['CPUExecutionProvider'])
-proc_sess = ort.InferenceSession("ofdm_process_noprofix_sim.onnx", providers=['CPUExecutionProvider'])
+gen_sess = ort.InferenceSession("ofdm_generator_noprefix_sim.onnx", providers=['CPUExecutionProvider'])
+proc_sess = ort.InferenceSession("ofdm_process_noprefix_sim.onnx", providers=['CPUExecutionProvider'])
 
 ofdm_time = gen_sess.run(None, {"input": freq})[0]  # (1, 2, 64)
 
