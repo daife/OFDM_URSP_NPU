@@ -11,3 +11,5 @@ fusion_result.json
 ofdm_generator.om
 ofdm_process.om
 ofdm_process_noprefix_sim.json
+ofdm_generator_v2.onnx
+ofdm_generator_v2.onnx.data
