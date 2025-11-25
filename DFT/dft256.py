@@ -27,14 +27,14 @@ class ComplexDFT256(nn.Module):
         x_imag = x[:, 1:2, :]  # (batch, 1, 256)
         real_part = self.real_conv(x_real) - self.imag_conv(x_imag)  # (batch, 256, 1)
         imag_part = self.real_conv(x_imag) + self.imag_conv(x_real)  # (batch, 256, 1)
-        # 输出直接为(batch, 2, 256)，无需转置
+        # 输出直接为(batch, 2, 256)
         out = torch.cat([real_part, imag_part], dim=1)  # (batch, 2, 256)
         return out
 
 # ONNX导出
 if __name__ == "__main__":
     model = ComplexDFT256()
-    dummy_input = torch.randn(1, 2, 256)
+    dummy_input = torch.randn(32, 2, 256)  # 修改为32个batch
     torch.onnx.export(
         model,
         (dummy_input,),

@@ -11,14 +11,7 @@ def check_ret(msg, ret):
     if ret != ACL_SUCCESS:
         raise Exception(f"{msg} failed ret={ret}")
 
-def run_acl_model(model_path, input_data):
-    # 加载模型
-    model_id, ret = acl.mdl.load_from_file(model_path)
-    check_ret("acl.mdl.load_from_file", ret)
-    model_desc = acl.mdl.create_desc()
-    ret = acl.mdl.get_desc(model_desc, model_id)
-    check_ret("acl.mdl.get_desc", ret)
-
+def run_acl_model(model_id, model_desc, input_data):
     # 输入数据
     input_size = input_data.size * input_data.itemsize
     input_device, ret = acl.rt.malloc(input_size, ACL_MEM_MALLOC_NORMAL_ONLY)
@@ -65,16 +58,12 @@ def run_acl_model(model_path, input_data):
     check_ret("acl.mdl.destroy_dataset", ret)
     ret = acl.destroy_data_buffer(input_data_buffer)
     check_ret("acl.destroy_data_buffer", ret)
-    ret = acl.mdl.unload(model_id)
-    check_ret("acl.mdl.unload", ret)
-    ret = acl.mdl.destroy_desc(model_desc)
-    check_ret("acl.mdl.destroy_desc", ret)
     return elapsed
 
 if __name__ == "__main__":
     np.random.seed(42)
     x = np.random.randn(2, 256).astype(np.float32)
-    x_batch = x[np.newaxis, ...]  # (1, 2, 256)
+    x_batch = np.stack([x for _ in range(32)], axis=0)  # (32, 2, 256)
 
     # 初始化ACL环境和设备，只做一次
     ret = acl.init()
@@ -87,11 +76,35 @@ if __name__ == "__main__":
     stream, ret = acl.rt.create_stream()
     check_ret("acl.rt.create_stream", ret)
 
-    t1 = run_acl_model("dft256.om", x_batch)
-    print(f"dft256.om推理时间: {t1*1000:.2f} ms")
+    # 加载模型，只加载一次
+    model_id1, ret = acl.mdl.load_from_file("dft256.om")
+    check_ret("acl.mdl.load_from_file dft256.om", ret)
+    model_desc1 = acl.mdl.create_desc()
+    ret = acl.mdl.get_desc(model_desc1, model_id1)
+    check_ret("acl.mdl.get_desc dft256.om", ret)
 
-    t2 = run_acl_model("dft256_mat.om", x_batch)
-    print(f"dft256_mat.om推理时间: {t2*1000:.2f} ms")
+    model_id2, ret = acl.mdl.load_from_file("dft256_mat.om")
+    check_ret("acl.mdl.load_from_file dft256_mat.om", ret)
+    model_desc2 = acl.mdl.create_desc()
+    ret = acl.mdl.get_desc(model_desc2, model_id2)
+    check_ret("acl.mdl.get_desc dft256_mat.om", ret)
+
+    # 推理1次，输入为32个batch，打印总耗时和
+    t1 = run_acl_model(model_id1, model_desc1, x_batch)
+    print(f"dft256.om 32个batch总推理时间: {t1*1000:.2f} ms")
+
+    t2 = run_acl_model(model_id2, model_desc2, x_batch)
+    print(f"dft256_mat.om 32个batch总推理时间: {t2*1000:.2f} ms")
+
+    # 卸载模型和销毁desc
+    ret = acl.mdl.unload(model_id1)
+    check_ret("acl.mdl.unload dft256.om", ret)
+    ret = acl.mdl.destroy_desc(model_desc1)
+    check_ret("acl.mdl.destroy_desc dft256.om", ret)
+    ret = acl.mdl.unload(model_id2)
+    check_ret("acl.mdl.unload dft256_mat.om", ret)
+    ret = acl.mdl.destroy_desc(model_desc2)
+    check_ret("acl.mdl.destroy_desc dft256_mat.om", ret)
 
     # 统一释放ACL环境和设备
     ret = acl.rt.destroy_stream(stream)

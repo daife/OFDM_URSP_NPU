@@ -25,7 +25,7 @@ class MatrixDFT256(nn.Module):
 
 if __name__ == "__main__":
     model = MatrixDFT256()
-    dummy_input = torch.randn(1, 2, 256)
+    dummy_input = torch.randn(32, 2, 256)  # 修改为32个batch
     torch.onnx.export(
         model,
         (dummy_input,),
