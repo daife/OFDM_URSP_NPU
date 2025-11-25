@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-# ----------- IFFT模块（Conv1d实现） -----------
-class ComplexIFFT(nn.Module):
+# ----------- IDFT模块（Conv1d实现） -----------
+class ComplexIDFT(nn.Module):
     def __init__(self, fft_len):
         super().__init__()
         self.fft_len = fft_len
@@ -48,14 +48,14 @@ def insert_pilots(data_freq):
 def generate_ofdm_symbol(eq_freq):
     # eq_freq: (batch, 2, 64)
     freq_with_pilots = insert_pilots(eq_freq.clone())  # 插入导频
-    ifft_model = ComplexIFFT(64)
+    ifft_model = ComplexIDFT(64)
     time_samples = ifft_model(freq_with_pilots)  # (batch, 2, 64)
     return time_samples  # 时域信号（无CP）
 
 class OFDMGeneratorModule(nn.Module):
     def __init__(self):
         super().__init__()
-        self.ifft_model = ComplexIFFT(64)
+        self.ifft_model = ComplexIDFT(64)
 
     def forward(self, eq_freq):
         # eq_freq: (batch, 2, 64)

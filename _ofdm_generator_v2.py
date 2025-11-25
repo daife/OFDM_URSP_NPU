@@ -40,8 +40,8 @@ class QAM1024Modulator(nn.Module):
         modulated = self.constellation[indices]  # (batch, num_symbols, 2)
         return modulated.permute(0, 2, 1)  # (batch, 2, num_symbols)
 
-# ----------- IFFT模块（Conv1d实现，256点） -----------
-class ComplexIFFT256(nn.Module):
+# ----------- IDFT模块（Conv1d实现，256点） -----------
+class ComplexIDFT256(nn.Module):
     def __init__(self, fft_len=256):
         super().__init__()
         self.fft_len = fft_len
@@ -128,7 +128,7 @@ class OFDMGeneratorModuleV2(nn.Module):
         super().__init__()
         self.qam_modulator = QAM1024Modulator()
         self.subcarrier_mapper = SubcarrierMapper()
-        self.ifft_model = ComplexIFFT256(256)
+        self.ifft_model = ComplexIDFT256(256)
 
     def forward(self, bits):
         # bits: (batch, 234*10) - 234个数据子载波，每个1024-QAM符号10比特
@@ -138,7 +138,7 @@ class OFDMGeneratorModuleV2(nn.Module):
         # 子载波映射和导频插入
         freq_domain = self.subcarrier_mapper(modulated_data)  # (batch, 2, 256)
         
-        # IFFT变换到时域
+        # IDFT变换到时域
         time_samples = self.ifft_model(freq_domain)  # (batch, 2, 256)
         
         return time_samples
@@ -148,7 +148,7 @@ def generate_ofdm_symbol_v2(eq_freq):
     # eq_freq: (batch, 2, 234) - 已调制的数据子载波
     mapper = SubcarrierMapper()
     freq_with_pilots = mapper(eq_freq)
-    ifft_model = ComplexIFFT256(256)
+    ifft_model = ComplexIDFT256(256)
     time_samples = ifft_model(freq_with_pilots)
     return time_samples
 

@@ -13,3 +13,7 @@ ofdm_process.om
 ofdm_process_noprefix_sim.json
 ofdm_generator_v2.onnx
 ofdm_generator_v2.onnx.data
+dft256_mat.onnx
+dft256_mat.onnx.data
+dft256.onnx
+dft256.onnx.data

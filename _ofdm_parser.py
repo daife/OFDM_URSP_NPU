@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-# ----------- FFT模块（Conv1d实现） -----------
-class OneSidedComplexFFT(nn.Module):
+# ----------- DFT模块（Conv1d实现） -----------
+class OneSidedComplexDFT(nn.Module):
     def __init__(self, fft_len):
         super().__init__()
         self.fft_len = fft_len
@@ -25,7 +25,7 @@ class OneSidedComplexFFT(nn.Module):
         self.imag_conv.weight.requires_grad = False
 
     def forward(self, x):
-        # x: (batch, 2, 64)
+        # x: (batch, 2,     64)
         x_real = x[:, 0:1, :]  # (batch, 1, 64)
         x_imag = x[:, 1:2, :]
         real_part = self.real_conv(x_real) - self.imag_conv(x_imag)  # (batch, 64, 1)
@@ -75,7 +75,7 @@ def channel_equalization(fft_out, h_est):
 def process_ofdm_symbol(ofdm_samples):
     # ofdm_samples: (batch, 2, 64), np.float32
     x = torch.from_numpy(ofdm_samples).float()
-    fft_model = OneSidedComplexFFT(64)
+    fft_model = OneSidedComplexDFT(64)
     fft_out = fft_model(x)  # (batch, 2, 64)
 
     pilots = extract_pilots(fft_out)  # (batch, 4, 2)
@@ -87,7 +87,7 @@ def process_ofdm_symbol(ofdm_samples):
 class OFDMProcessModule(nn.Module):
     def __init__(self):
         super().__init__()
-        self.fft_model = OneSidedComplexFFT(64)
+        self.fft_model = OneSidedComplexDFT(64)
 
     def forward(self, x):
         # x: (batch, 2, 64)
