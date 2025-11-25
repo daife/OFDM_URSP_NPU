@@ -39,10 +39,10 @@ def main():
     t_numpy = time.time() - t0
 
     # dft256.onnx
-    out1, t_onnx1 = run_onnx("dft256.onnx", x_batch)
+    out1, t_onnx1 = run_onnx("dft256_noprefix.onnx", x_batch)
 
     # dft256_mat.onnx
-    out2, t_onnx2 = run_onnx("dft256_mat.onnx", x_batch)
+    out2, t_onnx2 = run_onnx("dft256_mat_noprefix.onnx", x_batch)
 
     # 误差
     err1 = np.max(np.abs(ref_out - out1))

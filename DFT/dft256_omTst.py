@@ -12,17 +12,6 @@ def check_ret(msg, ret):
         raise Exception(f"{msg} failed ret={ret}")
 
 def run_acl_model(model_path, input_data):
-    # 初始化ACL
-    ret = acl.init()
-    check_ret("acl.init", ret)
-    dev_id = 0
-    ret = acl.rt.set_device(dev_id)
-    check_ret("acl.rt.set_device", ret)
-    context, ret = acl.rt.create_context(dev_id)
-    check_ret("acl.rt.create_context", ret)
-    stream, ret = acl.rt.create_stream()
-    check_ret("acl.rt.create_stream", ret)
-
     # 加载模型
     model_id, ret = acl.mdl.load_from_file(model_path)
     check_ret("acl.mdl.load_from_file", ret)
@@ -80,6 +69,31 @@ def run_acl_model(model_path, input_data):
     check_ret("acl.mdl.unload", ret)
     ret = acl.mdl.destroy_desc(model_desc)
     check_ret("acl.mdl.destroy_desc", ret)
+    return elapsed
+
+if __name__ == "__main__":
+    np.random.seed(42)
+    x = np.random.randn(2, 256).astype(np.float32)
+    x_batch = x[np.newaxis, ...]  # (1, 2, 256)
+
+    # 初始化ACL环境和设备，只做一次
+    ret = acl.init()
+    check_ret("acl.init", ret)
+    dev_id = 0
+    ret = acl.rt.set_device(dev_id)
+    check_ret("acl.rt.set_device", ret)
+    context, ret = acl.rt.create_context(dev_id)
+    check_ret("acl.rt.create_context", ret)
+    stream, ret = acl.rt.create_stream()
+    check_ret("acl.rt.create_stream", ret)
+
+    t1 = run_acl_model("dft256.om", x_batch)
+    print(f"dft256.om推理时间: {t1*1000:.2f} ms")
+
+    t2 = run_acl_model("dft256_mat.om", x_batch)
+    print(f"dft256_mat.om推理时间: {t2*1000:.2f} ms")
+
+    # 统一释放ACL环境和设备
     ret = acl.rt.destroy_stream(stream)
     check_ret("acl.rt.destroy_stream", ret)
     ret = acl.rt.destroy_context(context)
@@ -88,15 +102,3 @@ def run_acl_model(model_path, input_data):
     check_ret("acl.rt.reset_device", ret)
     ret = acl.finalize()
     check_ret("acl.finalize", ret)
-    return elapsed
-
-if __name__ == "__main__":
-    np.random.seed(42)
-    x = np.random.randn(2, 256).astype(np.float32)
-    x_batch = x[np.newaxis, ...]  # (1, 2, 256)
-
-    t1 = run_acl_model("dft256.om", x_batch)
-    print(f"dft256.om推理时间: {t1*1000:.2f} ms")
-
-    t2 = run_acl_model("dft256_mat.om", x_batch)
-    print(f"dft256_mat.om推理时间: {t2*1000:.2f} ms")
