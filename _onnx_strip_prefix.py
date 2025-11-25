@@ -13,3 +13,4 @@ if __name__ == "__main__":
     strip_op_type_prefix("ofdm_generator.onnx", "ofdm_generator_noprefix.onnx")
     strip_op_type_prefix("dft256.onnx", "dft256_noprefix.onnx")
     strip_op_type_prefix("dft256_mat.onnx", "dft256_mat_noprefix.onnx")
+    strip_op_type_prefix("dft256_mat_512.onnx", "dft256_mat_512_noprefix.onnx")

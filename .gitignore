@@ -20,3 +20,5 @@ dft256.onnx.data
 /msprof
 dft256_mat.om
 dft256.om
+dft256_mat_512.onnx.data
+dft256_mat_512.onnx
