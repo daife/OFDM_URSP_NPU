@@ -22,3 +22,7 @@ dft256_mat.om
 dft256.om
 dft256_mat_512.onnx.data
 dft256_mat_512.onnx
+idft256_mat.onnx
+idft256_mat.onnx.data
+idft256.onnx
+idft256.onnx.data
