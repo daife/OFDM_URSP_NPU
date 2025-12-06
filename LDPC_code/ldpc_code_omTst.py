@@ -63,12 +63,12 @@ def run_acl_model(model_id, model_desc, input_data):
 if __name__ == "__main__":
     np.random.seed(42)
     # BG1, Z=384, N=22*384=8448, K=8448, 输出为25344
-    batch_size = 32
+    batch_size = 1
     K = 8448
     output_len = 25344
-    # 输入为INT32，shape为(batch_size, K)
+    # 输入为INT32，shape为(batch_size, K)，且只包含0或1
     x = np.random.randint(0, 2, (K,)).astype(np.int32)
-    x_batch = np.stack([x for _ in range(batch_size)], axis=0)  # (32, 8448)
+    x_batch = x.reshape((1, K))  # (1, 8448)
 
     # 初始化ACL环境和设备
     ret = acl.init()
@@ -82,23 +82,23 @@ if __name__ == "__main__":
     check_ret("acl.rt.create_stream", ret)
 
     # 加载模型
-    model_id, ret = acl.mdl.load_from_file("ldpc_bg1.om")
-    check_ret("acl.mdl.load_from_file ldpc_bg1.om", ret)
+    model_id, ret = acl.mdl.load_from_file("ldpc_encode.onnx.om")
+    check_ret("acl.mdl.load_from_file ldpc_encode.onnx.om", ret)
     model_desc = acl.mdl.create_desc()
     ret = acl.mdl.get_desc(model_desc, model_id)
-    check_ret("acl.mdl.get_desc ldpc_bg1.om", ret)
+    check_ret("acl.mdl.get_desc ldpc_encode.onnx.om", ret)
 
     # 推理
     t1 = run_acl_model(model_id, model_desc, x_batch)
-    print(f"ldpc_bg1.om 32个batch总推理时间: {t1*1000:.2f} ms")
+    print(f"ldpc_encode.onnx.om 1个batch总推理时间: {t1*1000:.2f} ms")
     print(f"输入shape: {x_batch.shape}, dtype: {x_batch.dtype}")
-    print(f"输出应为shape: ({batch_size}, {output_len}), dtype: np.int32")
+    # print(f"输出为shape: ({batch_size}, {output_len}), dtype: np.int32")
 
     # 卸载模型和销毁desc
     ret = acl.mdl.unload(model_id)
-    check_ret("acl.mdl.unload ldpc_bg1.om", ret)
+    check_ret("acl.mdl.unload ldpc_encode.onnx.om", ret)
     ret = acl.mdl.destroy_desc(model_desc)
-    check_ret("acl.mdl.destroy_desc ldpc_bg1.om", ret)
+    check_ret("acl.mdl.destroy_desc ldpc_encode.onnx.om", ret)
 
     # 统一释放ACL环境和设备
     ret = acl.rt.destroy_stream(stream)
