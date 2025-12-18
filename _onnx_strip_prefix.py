@@ -18,3 +18,5 @@ if __name__ == "__main__":
     strip_op_type_prefix("idft256_mat.onnx", "idft256_mat_noprefix.onnx")
     strip_op_type_prefix("ldpc_encode.onnx", "ldpc_encode_noprefix.onnx")
     strip_op_type_prefix("fft256.onnx", "fft256_noprefix.onnx")
+    strip_op_type_prefix("dft256_mat_1024.onnx", "dft256_mat_1024_noprefix.onnx")
+    strip_op_type_prefix("idft256_mat_1024.onnx", "idft256_mat_1024_noprefix.onnx")
