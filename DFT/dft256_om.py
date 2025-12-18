@@ -2,8 +2,8 @@ import numpy as np
 import acl
 import time
 
-# 宏定义：.om 模型编译时的 batch 数
-MODEL_BATCH = 32
+# 宏定义：.om 模型编译时的 batch 数,注意这个是编译静态图时就已经确定了，该数字要换模型文件
+MODEL_BATCH = 1024
 ACL_MEM_MALLOC_NORMAL_ONLY = 0
 ACL_MEMCPY_HOST_TO_DEVICE = 0
 ACL_MEMCPY_DEVICE_TO_HOST = 1
@@ -65,7 +65,7 @@ if __name__ == "__main__":
     stream, ret = acl.rt.create_stream(); check_ret("acl.rt.create_stream", ret)
 
     # 根据实际选择对应的 .om 模型文件，idft就用idft的模型，反正输入输出是一样的
-    model_id, ret = acl.mdl.load_from_file("dft256_mat.om"); check_ret("acl.mdl.load_from_file", ret)
+    model_id, ret = acl.mdl.load_from_file("dft256_mat_1024.om"); check_ret("acl.mdl.load_from_file", ret)
     model_desc = acl.mdl.create_desc()
     ret = acl.mdl.get_desc(model_desc, model_id); check_ret("acl.mdl.get_desc", ret)
 
