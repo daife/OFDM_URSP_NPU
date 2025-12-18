@@ -2,78 +2,81 @@ import numpy as np
 import acl
 import time
 
+# 宏定义：.om 模型编译时的 batch 数
+MODEL_BATCH = 32
+ACL_MEM_MALLOC_NORMAL_ONLY = 0
 ACL_MEMCPY_HOST_TO_DEVICE = 0
 ACL_MEMCPY_DEVICE_TO_HOST = 1
-ACL_MEM_MALLOC_NORMAL_ONLY = 0
 ACL_SUCCESS = 0
-BATCH_SIZE = 32  # 指定 .om 模型的 batch 数
 
 def check_ret(msg, ret):
     if ret != ACL_SUCCESS:
-        raise Exception(f"{msg} failed ret={ret}")
+        raise RuntimeError(f"{msg} failed ret={ret}")
 
-def run_acl_model(model_id, model_desc, input_data):
-    # 输入数据如何得到：示例用随机浮点，shape=(BATCH_SIZE, 2, 256)，实部+虚部
-    input_size = input_data.size * input_data.itemsize
+def run_acl_model(model_id, model_desc, host_x):
+    # 输入数据如何得到：此处使用随机模拟 (MODEL_BATCH, 2, 256) 的实虚部
+    input_size = host_x.size * host_x.itemsize
     input_device, ret = acl.rt.malloc(input_size, ACL_MEM_MALLOC_NORMAL_ONLY); check_ret("acl.rt.malloc", ret)
-    ret = acl.rt.memcpy(input_device, input_size, acl.util.numpy_to_ptr(input_data), input_size, ACL_MEMCPY_HOST_TO_DEVICE); check_ret("acl.rt.memcpy", ret)
-    input_data_buffer = acl.create_data_buffer(input_device, input_size)
-    input_dataset = acl.mdl.create_dataset(); _, ret = acl.mdl.add_dataset_buffer(input_dataset, input_data_buffer); check_ret("acl.mdl.add_dataset_buffer", ret)
+    ret = acl.rt.memcpy(input_device, input_size, acl.util.bytes_to_ptr(host_x.tobytes()),
+                        input_size, ACL_MEMCPY_HOST_TO_DEVICE); check_ret("acl.rt.memcpy", ret)
+    input_buf = acl.create_data_buffer(input_device, input_size)
+    input_ds = acl.mdl.create_dataset()
+    _, ret = acl.mdl.add_dataset_buffer(input_ds, input_buf); check_ret("acl.mdl.add_dataset_buffer", ret)
 
-    # 输出数据是怎样的：模型输出为 (batch, 2, 256)，分别是实部/虚部
-    output_num = acl.mdl.get_num_outputs(model_desc)
-    output_dataset = acl.mdl.create_dataset()
-    output_buffers = []
-    host_outputs = []
-    for i in range(output_num):
-        output_size = acl.mdl.get_output_size_by_index(model_desc, i)
-        output_device, ret = acl.rt.malloc(output_size, ACL_MEM_MALLOC_NORMAL_ONLY); check_ret("acl.rt.malloc", ret)
-        output_data_buffer = acl.create_data_buffer(output_device, output_size)
-        _, ret = acl.mdl.add_dataset_buffer(output_dataset, output_data_buffer); check_ret("acl.mdl.add_dataset_buffer", ret)
-        output_buffers.append((output_device, output_size, output_data_buffer))
-        host_outputs.append(np.empty((BATCH_SIZE, 2, 256), dtype=np.float32))
+    # 输出数据是怎样的：IDFT 输出同样为 (MODEL_BATCH, 2, 256) 的实虚部 float32
+    out_num = acl.mdl.get_num_outputs(model_desc)
+    output_ds = acl.mdl.create_dataset()
+    out_dev, out_sizes, out_bufs = [], [], []
+    for i in range(out_num):
+        size_i = acl.mdl.get_output_size_by_index(model_desc, i)
+        dev_i, ret = acl.rt.malloc(size_i, ACL_MEM_MALLOC_NORMAL_ONLY); check_ret("acl.rt.malloc", ret)
+        buf_i = acl.create_data_buffer(dev_i, size_i)
+        _, ret = acl.mdl.add_dataset_buffer(output_ds, buf_i); check_ret("acl.mdl.add_dataset_buffer", ret)
+        out_dev.append(dev_i); out_sizes.append(size_i); out_bufs.append(buf_i)
 
-    # 如何执行模型推理：调用 acl.mdl.execute 输入/输出 dataset 完成离线推理
+    # 如何执行模型推理：执行 acl.mdl.execute 并计时
     start = time.time()
-    ret = acl.mdl.execute(model_id, input_dataset, output_dataset); check_ret("acl.mdl.execute", ret)
+    ret = acl.mdl.execute(model_id, input_ds, output_ds); check_ret("acl.mdl.execute", ret)
     elapsed = time.time() - start
 
-    # 拷回输出
-    for i, (output_device, output_size, _) in enumerate(output_buffers):
-        ret = acl.rt.memcpy(acl.util.numpy_to_ptr(host_outputs[i]), output_size, output_device, output_size, ACL_MEMCPY_DEVICE_TO_HOST); check_ret("acl.rt.memcpy D2H", ret)
-    out = host_outputs[0] if output_num == 1 else np.stack(host_outputs, axis=0)
+    host_out = np.empty(host_x.shape, dtype=np.float32)
+    ret = acl.rt.memcpy(acl.util.bytes_to_ptr(host_out.tobytes()), out_sizes[0],
+                        out_dev[0], out_sizes[0], ACL_MEMCPY_DEVICE_TO_HOST); check_ret("acl.rt.memcpy D2H", ret)
 
     # 释放资源
     ret = acl.rt.free(input_device); check_ret("acl.rt.free input", ret)
-    for output_device, _, output_data_buffer in output_buffers:
-        ret = acl.rt.free(output_device); check_ret("acl.rt.free output", ret)
-        ret = acl.destroy_data_buffer(output_data_buffer); check_ret("acl.destroy_data_buffer out", ret)
-    ret = acl.mdl.destroy_dataset(input_dataset); check_ret("acl.mdl.destroy_dataset in", ret)
-    ret = acl.mdl.destroy_dataset(output_dataset); check_ret("acl.mdl.destroy_dataset out", ret)
-    ret = acl.destroy_data_buffer(input_data_buffer); check_ret("acl.destroy_data_buffer in", ret)
-    return out, elapsed
+    for dev, buf in zip(out_dev, out_bufs):
+        ret = acl.rt.free(dev); check_ret("acl.rt.free output", ret)
+        ret = acl.destroy_data_buffer(buf); check_ret("acl.destroy_data_buffer output", ret)
+    ret = acl.mdl.destroy_dataset(input_ds); check_ret("acl.mdl.destroy_dataset input", ret)
+    ret = acl.mdl.destroy_dataset(output_ds); check_ret("acl.mdl.destroy_dataset output", ret)
+    ret = acl.destroy_data_buffer(input_buf); check_ret("acl.destroy_data_buffer input", ret)
+    return host_out, elapsed
 
 if __name__ == "__main__":
+    # 随机模拟输入
     np.random.seed(42)
-    x = np.random.randn(2, 256).astype(np.float32)
-    x_batch = np.stack([x for _ in range(BATCH_SIZE)], axis=0)
+    x_batch = np.random.randn(MODEL_BATCH, 2, 256).astype(np.float32)
 
     ret = acl.init(); check_ret("acl.init", ret)
     dev_id = 0
     ret = acl.rt.set_device(dev_id); check_ret("acl.rt.set_device", ret)
-    context, ret = acl.rt.create_context(dev_id); check_ret("acl.rt.create_context", ret)
+    ctx, ret = acl.rt.create_context(dev_id); check_ret("acl.rt.create_context", ret)
     stream, ret = acl.rt.create_stream(); check_ret("acl.rt.create_stream", ret)
 
+    # 根据实际选择对应的 .om 模型文件，idft就用idft的模型，反正输入输出是一样的
     model_id, ret = acl.mdl.load_from_file("dft256_mat.om"); check_ret("acl.mdl.load_from_file", ret)
-    model_desc = acl.mdl.create_desc(); ret = acl.mdl.get_desc(model_desc, model_id); check_ret("acl.mdl.get_desc", ret)
+    model_desc = acl.mdl.create_desc()
+    ret = acl.mdl.get_desc(model_desc, model_id); check_ret("acl.mdl.get_desc", ret)
 
+#####下面是推理，只要循环运行下面这个就行，不需要每次都load和unload模型
+#测试没问题就把run_acl_model计时功能删掉吧
     out, t = run_acl_model(model_id, model_desc, x_batch)
-    print(f"dft256_mat.om {BATCH_SIZE} 个 batch 总推理时间: {t*1000:.2f} ms")
-    print("输出形状:", out.shape)
-
+    print(f"idft256_mat.om batch={MODEL_BATCH} 输出形状 {out.shape}, 总耗时 {t*1000:.2f} ms")
+#####上面是推理
     ret = acl.mdl.unload(model_id); check_ret("acl.mdl.unload", ret)
     ret = acl.mdl.destroy_desc(model_desc); check_ret("acl.mdl.destroy_desc", ret)
     ret = acl.rt.destroy_stream(stream); check_ret("acl.rt.destroy_stream", ret)
-    ret = acl.rt.destroy_context(context); check_ret("acl.rt.destroy_context", ret)
+    ret = acl.rt.destroy_context(ctx); check_ret("acl.rt.destroy_context", ret)
     ret = acl.rt.reset_device(dev_id); check_ret("acl.rt.reset_device", ret)
     ret = acl.finalize(); check_ret("acl.finalize", ret)
