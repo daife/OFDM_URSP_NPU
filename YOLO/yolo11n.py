@@ -50,8 +50,9 @@ def load_image(image_path):
 
 def postprocess(pred, conf_thresh=0.01, iou_thresh=0.3):
     arr = pred[0]
-    # 只处理(1, 8400, 84)情况
-    if arr.shape == (1, 8400, 84):
+    # 只处理(1, 84, 8400)情况
+    if arr.shape == (1, 84, 8400):
+        arr = arr.transpose(0, 2, 1)  # (1, 8400, 84)
         arr = arr[0]
     else:
         raise ValueError(f"Unexpected pred shape: {arr.shape}")
@@ -72,7 +73,6 @@ def postprocess(pred, conf_thresh=0.01, iou_thresh=0.3):
         x2 = int(cx + w / 2)
         y2 = int(cy + h / 2)
         detections.append([x1, y1, x2, y2, float(score), int(class_id)])
-    # NMS
     boxes = [d[:4] for d in detections]
     scores = [d[4] for d in detections]
     indices = cv2.dnn.NMSBoxes(boxes, scores, conf_thresh, iou_thresh)
