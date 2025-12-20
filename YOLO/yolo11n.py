@@ -48,7 +48,7 @@ def load_image(image_path):
     img_np = img_np.transpose(2, 0, 1)[np.newaxis].astype(np.float32) / 255
     return img_np, np.array(img)
 
-def postprocess(pred, conf_thresh=0.01, iou_thresh=0.3):
+def postprocess(pred, conf_thresh=0.0005, iou_thresh=0.5):
     arr = pred[0]
     # 只处理(1, 84, 8400)情况
     if arr.shape == (1, 84, 8400):
