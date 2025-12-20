@@ -1,19 +1,19 @@
 import numpy as np
-import acl
 import time
 from PIL import Image
 import cv2
+import acl
 
 MODEL_PATH = "./yolo11n.om"
 IMAGE_PATH = "./YOLO/tst.jpg"
-SAVE_PATH = "./YOLO/tst_out.jpg"
+SAVE_PATH = "./YOLO/tst_result.jpg"
 MODEL_BATCH = 1
 ACL_MEM_MALLOC_NORMAL_ONLY = 0
 ACL_MEMCPY_HOST_TO_DEVICE = 0
 ACL_MEMCPY_DEVICE_TO_HOST = 1
 ACL_SUCCESS = 0
 
-COCO_LABELS = [
+COCO_CLASSES = [
     "person","bicycle","car","motorcycle","airplane","bus","train","truck","boat","traffic light",
     "fire hydrant","stop sign","parking meter","bench","bird","cat","dog","horse","sheep","cow",
     "elephant","bear","zebra","giraffe","backpack","umbrella","handbag","tie","suitcase","frisbee",
@@ -25,14 +25,15 @@ COCO_LABELS = [
     "hair drier","toothbrush"
 ]
 
+def load_image(image_path):
+    img = Image.open(image_path).convert('RGB')
+    img_np = np.array(img)
+    img_input = img_np.transpose(2, 0, 1)[np.newaxis].astype(np.float32) / 255
+    return img_input, img_np
+
 def check_ret(msg, ret):
     if ret != ACL_SUCCESS:
         raise RuntimeError(f"{msg} failed ret={ret}")
-
-def preprocess(img_np):
-    # 输入为RGB格式，直接归一化并转为模型输入格式
-    img = img_np.transpose(2,0,1)[np.newaxis].astype(np.float32)/255
-    return img
 
 def run_acl_model(model_id, model_desc, host_x):
     input_size = host_x.size * host_x.itemsize
@@ -74,17 +75,13 @@ def run_acl_model(model_id, model_desc, host_x):
 
 def postprocess(pred, conf_thresh=0.0005, iou_thresh=0.5):
     arr = pred[0]
-    # 只处理(1, 8400, 84)或(1, 84, 8400)情况
-    if arr.shape == (1, 84, 8400):
-        arr = arr.transpose(0, 2, 1)  # (1, 8400, 84)
-        arr = arr[0]
-    elif arr.shape == (1, 8400, 84):
-        arr = arr[0]
-    elif arr.shape == (8400, 84):
-        # 已经是(8400, 84)
-        pass
-    else:
-        raise ValueError(f"Unexpected pred shape: {arr.shape}")
+    # # 只处理(1, 8400, 84)情况
+    # if arr.shape == (1, 8400, 84):
+    #     arr = arr[0]
+    # elif arr.shape == (1, 84, 8400):
+    #     arr = arr.transpose(0, 2, 1)[0]
+    # else:
+    #     raise ValueError(f"Unexpected pred shape: {arr.shape}")
     conf_mask = arr[:, 4] > conf_thresh
     detections = []
     for i in range(arr.shape[0]):
@@ -116,19 +113,12 @@ def postprocess(pred, conf_thresh=0.0005, iou_thresh=0.5):
 def draw_boxes(img, detections):
     for det in detections:
         x1, y1, x2, y2, score, cls_id = det
-        label = f"{COCO_LABELS[cls_id]} {score:.2f}"
+        label = f"{COCO_CLASSES[cls_id]} {score:.2f}"
         cv2.rectangle(img, (x1, y1), (x2, y2), (0,255,0), 2)
         cv2.putText(img, label, (x1, max(y1-10, 0)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
     return img
 
 def main(mode="print"):  # mode: "print" or "save"
-    # 计时：前处理
-    t0 = time.time()
-    img_pil = Image.open(IMAGE_PATH).convert("RGB")
-    img_np = np.array(img_pil)
-    img_input = img_np.transpose(2,0,1)[np.newaxis].astype(np.float32)/255
-    t1 = time.time()
-
     # ACL初始化与模型加载
     ret = acl.init(); check_ret("acl.init", ret)
     dev_id = 0
@@ -139,41 +129,47 @@ def main(mode="print"):  # mode: "print" or "save"
     model_desc = acl.mdl.create_desc()
     ret = acl.mdl.get_desc(model_desc, model_id); check_ret("acl.mdl.get_desc", ret)
 
-    # 推理
-    t2 = time.time()
-    out, infer_time = run_acl_model(model_id, model_desc, img_input)
-    t3 = time.time()
+    try:
+        # 1. 读取图片
+        t0 = time.time()
+        img_input, img_for_draw = load_image(IMAGE_PATH)
+        t1 = time.time()
 
-    # 后处理
-    detections = postprocess(out)
-    t4 = time.time()
+        # 2. 推理
+        t2 = time.time()
+        out, infer_time = run_acl_model(model_id, model_desc, img_input)
+        t3 = time.time()
 
-    # 统计标签
-    label_count = {}
-    for det in detections:
-        cls_id = det[5]
-        label = COCO_LABELS[cls_id]
-        label_count[label] = label_count.get(label, 0) + 1
+        # 3. 后处理
+        detections = postprocess(out)
+        t4 = time.time()
 
-    # 打印
-    print("识别到的标签及数量:", label_count)
-    print(f"前处理耗时: {(t1-t0)*1000:.2f} ms, 推理耗时: {(t3-t2)*1000:.2f} ms, 后处理耗时: {(t4-t3)*1000:.2f} ms")
+        # 4. 统计标签
+        label_count = {}
+        for det in detections:
+            cls_id = det[5]
+            label = COCO_CLASSES[cls_id]
+            label_count[label] = label_count.get(label, 0) + 1
 
-    if mode == "save":
-        img_draw = draw_boxes(img_np.copy(), detections)
-        cv2.imwrite(SAVE_PATH, cv2.cvtColor(img_draw, cv2.COLOR_RGB2BGR))
-        print(f"结果已保存到: {SAVE_PATH}")
+        # 5. 打印
+        print("识别到的标签及数量:", label_count)
+        print(f"前处理耗时: {(t1-t0)*1000:.2f} ms, 推理耗时: {(t3-t2)*1000:.2f} ms, 后处理耗时: {(t4-t3)*1000:.2f} ms")
 
-    # 释放资源
-    ret = acl.mdl.unload(model_id); check_ret("acl.mdl.unload", ret)
-    ret = acl.mdl.destroy_desc(model_desc); check_ret("acl.mdl.destroy_desc", ret)
-    ret = acl.rt.destroy_stream(stream); check_ret("acl.rt.destroy_stream", ret)
-    ret = acl.rt.destroy_context(ctx); check_ret("acl.rt.destroy_context", ret)
-    ret = acl.rt.reset_device(dev_id); check_ret("acl.rt.reset_device", ret)
-    ret = acl.finalize(); check_ret("acl.finalize", ret)
+        if mode == "save":
+            img_draw = draw_boxes(img_for_draw.copy(), detections)
+            cv2.imwrite(SAVE_PATH, cv2.cvtColor(img_draw, cv2.COLOR_RGB2BGR))
+            print(f"结果已保存到: {SAVE_PATH}")
+    finally:
+        # 资源释放
+        ret = acl.mdl.unload(model_id); check_ret("acl.mdl.unload", ret)
+        ret = acl.mdl.destroy_desc(model_desc); check_ret("acl.mdl.destroy_desc", ret)
+        ret = acl.rt.destroy_stream(stream); check_ret("acl.rt.destroy_stream", ret)
+        ret = acl.rt.destroy_context(ctx); check_ret("acl.rt.destroy_context", ret)
+        ret = acl.rt.reset_device(dev_id); check_ret("acl.rt.reset_device", ret)
+        ret = acl.finalize(); check_ret("acl.finalize", ret)
 
 if __name__ == "__main__":
     # 仅打印: main("print")
     # 打印并保存: main("save")
-    main("print")
-    # main("save")
+    # main("print")
+    main("save")
