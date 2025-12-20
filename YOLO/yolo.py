@@ -57,12 +57,29 @@ def unload_model(model_id, model_desc):
     ret = acl.mdl.unload(model_id); check_ret("acl.mdl.unload", ret)
     ret = acl.mdl.destroy_desc(model_desc); check_ret("acl.mdl.destroy_desc", ret)
 
+MODEL_INPUT_SIZE = (640, 640)  # 假设模型输入为640x640
+
+def letterbox(img, new_shape=(640, 640), color=(114, 114, 114)):
+    '''等比例缩放+padding到指定shape，返回新图、缩放比例、padding'''
+    shape = img.size  # PIL: (W, H)
+    ratio = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
+    new_unpad = (int(round(shape[0] * ratio)), int(round(shape[1] * ratio)))
+    dw = new_shape[0] - new_unpad[0]
+    dh = new_shape[1] - new_unpad[1]
+    dw /= 2
+    dh /= 2
+    img = img.resize(new_unpad, Image.BILINEAR)
+    new_img = Image.new('RGB', new_shape, color)
+    new_img.paste(img, (int(dw), int(dh)))
+    return new_img, ratio, dw, dh
+
 def preprocess(image_path):
     t0 = time.time()
     img = Image.open(image_path).convert("RGB")
-    np_img = np.array(img, dtype=np.float32) / 255.0  # HWC, RGB
+    img_lb, ratio, dw, dh = letterbox(img, MODEL_INPUT_SIZE)
+    np_img = np.array(img_lb, dtype=np.float32) / 255.0  # HWC, RGB
     np_img = np_img.transpose(2, 0, 1)[np.newaxis, ...]  # NCHW
-    return np_img, time.time() - t0, img.size  # (W, H) from PIL
+    return np_img, time.time() - t0, img.size, ratio, dw, dh  # (W, H) from PIL
 
 def run_inference(model_id, model_desc, host_x):
     input_size = host_x.size * host_x.itemsize
@@ -125,12 +142,9 @@ def nms(dets, iou_thresh):
             cls_dets = [d for d in cls_dets if iou(best, d) < iou_thresh]
     return kept
 
-def postprocess(raw_out, orig_size, input_size):
+def postprocess(raw_out, orig_size, ratio, dw, dh):
     t0 = time.time()
-    in_h, in_w = input_size
     orig_w, orig_h = orig_size
-    scale_x = orig_w / in_w
-    scale_y = orig_h / in_h
     arr = raw_out.reshape(YOLO_OUTPUT_SHAPE).squeeze(0)  # (8400, 84)
     detections = []
     for i in range(arr.shape[0]):
@@ -142,10 +156,16 @@ def postprocess(raw_out, orig_size, input_size):
         conf = cls_conf * obj_conf
         if conf < CONF_THRESH:
             continue
-        x1 = max(0, min(int((cx - w / 2) * scale_x), orig_w - 1))
-        y1 = max(0, min(int((cy - h / 2) * scale_y), orig_h - 1))
-        x2 = max(0, min(int((cx + w / 2) * scale_x), orig_w - 1))
-        y2 = max(0, min(int((cy + h / 2) * scale_y), orig_h - 1))
+        # 反算到letterbox前的坐标
+        x1 = (cx - w / 2)
+        y1 = (cy - h / 2)
+        x2 = (cx + w / 2)
+        y2 = (cy + h / 2)
+        # 去除padding，缩放回原图
+        x1 = max(0, min(int((x1 - dw) / ratio), orig_w - 1))
+        y1 = max(0, min(int((y1 - dh) / ratio), orig_h - 1))
+        x2 = max(0, min(int((x2 - dw) / ratio), orig_w - 1))
+        y2 = max(0, min(int((y2 - dh) / ratio), orig_h - 1))
         detections.append((x1, y1, x2, y2, conf, cls_id))
     detections = nms(detections, NMS_THRESH)
     post_time = time.time() - t0
@@ -182,9 +202,9 @@ def main():
     try:
         model_id, model_desc = load_model(MODEL_PATH)
         try:
-            img, t_pre, orig_wh = preprocess(IMAGE_PATH)
+            img, t_pre, orig_wh, ratio, dw, dh = preprocess(IMAGE_PATH)
             out, t_inf = run_inference(model_id, model_desc, img)
-            dets, t_post = postprocess(out, orig_wh, img.shape[-2:])
+            dets, t_post = postprocess(out, orig_wh, ratio, dw, dh)
             summarize_and_optionally_save(dets, IMAGE_PATH, orig_wh, SAVE_OUTPUT)
             print(f"耗时: 预处理 {t_pre*1000:.2f} ms, 推理 {t_inf*1000:.2f} ms, 后处理 {t_post*1000:.2f} ms")
         finally:
