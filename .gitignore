@@ -33,3 +33,7 @@ dft256_mat_1024.onnx
 dft256_mat_1024.onnx.data
 idft256_mat_1024.onnx
 idft256_mat_1024.onnx.data
+dft256_mat_1192.onnx
+dft256_mat_1192.onnx.data
+idft256_mat_1192.onnx
+idft256_mat_1192.onnx.data

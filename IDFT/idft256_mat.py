@@ -24,11 +24,11 @@ class MatrixIDFT256(nn.Module):
 
 if __name__ == "__main__":
     model = MatrixIDFT256()
-    dummy_input = torch.randn(1024, 2, 256)
+    dummy_input = torch.randn(1192, 2, 256)
     torch.onnx.export(
         model,
         (dummy_input,),
-        "idft256_mat_1024.onnx",
+        "idft256_mat_1192.onnx",
         input_names=["input"],
         output_names=["output"],
         opset_version=18,
