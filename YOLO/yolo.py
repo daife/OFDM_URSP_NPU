@@ -1,115 +1,69 @@
-import os
-import time
 import numpy as np
 import acl
+import time
 from PIL import Image
 import cv2
 
-# 配置参数
 MODEL_PATH = "./yolo11n.om"
 IMAGE_PATH = "./YOLO/tst.jpg"
-SAVE_OUTPUT = True  # False: 仅打印; True: 打印并保存带框结果
-OUTPUT_IMAGE_PATH = "./YOLO/tst_out.jpg"
+SAVE_PATH = "./YOLO/tst_out.jpg"
+MODEL_BATCH = 1
 ACL_MEM_MALLOC_NORMAL_ONLY = 0
 ACL_MEMCPY_HOST_TO_DEVICE = 0
 ACL_MEMCPY_DEVICE_TO_HOST = 1
 ACL_SUCCESS = 0
-CONF_THRESH = 0.9
-NMS_THRESH = 0.02
-YOLO_OUTPUT_SHAPE = (1, 8400, 84)  # (batch, anchors, 4+80)
 
-COCO80 = [
+COCO_LABELS = [
     "person","bicycle","car","motorcycle","airplane","bus","train","truck","boat","traffic light",
     "fire hydrant","stop sign","parking meter","bench","bird","cat","dog","horse","sheep","cow",
     "elephant","bear","zebra","giraffe","backpack","umbrella","handbag","tie","suitcase","frisbee",
-    "skis","snowboard","sports ball","kite","baseball bat","baseball glove","skateboard","surfboard","tennis racket","bottle",
-    "wine glass","cup","fork","knife","spoon","bowl","banana","apple","sandwich","orange","broccoli",
-    "carrot","hot dog","pizza","donut","cake","chair","couch","potted plant","bed","dining table",
-    "toilet","tv","laptop","mouse","remote","keyboard","cell phone","microwave","oven","toaster",
-    "sink","refrigerator","book","clock","vase","scissors","teddy bear","hair drier","toothbrush"
+    "skis","snowboard","sports ball","kite","baseball bat","baseball glove","skateboard","surfboard",
+    "tennis racket","bottle","wine glass","cup","fork","knife","spoon","bowl","banana","apple",
+    "sandwich","orange","broccoli","carrot","hot dog","pizza","donut","cake","chair","couch",
+    "potted plant","bed","dining table","toilet","tv","laptop","mouse","remote","keyboard","cell phone",
+    "microwave","oven","toaster","sink","refrigerator","book","clock","vase","scissors","teddy bear",
+    "hair drier","toothbrush"
 ]
 
 def check_ret(msg, ret):
     if ret != ACL_SUCCESS:
         raise RuntimeError(f"{msg} failed ret={ret}")
 
-def init_acl():
-    ret = acl.init(); check_ret("acl.init", ret)
-    dev_id = 0
-    ret = acl.rt.set_device(dev_id); check_ret("acl.rt.set_device", ret)
-    ctx, ret = acl.rt.create_context(dev_id); check_ret("acl.rt.create_context", ret)
-    stream, ret = acl.rt.create_stream(); check_ret("acl.rt.create_stream", ret)
-    return dev_id, ctx, stream
+def preprocess(img_np):
+    # 输入为RGB格式，直接归一化并转为模型输入格式
+    img = img_np.transpose(2,0,1)[np.newaxis].astype(np.float32)/255
+    return img
 
-def finalize_acl(dev_id, ctx, stream):
-    ret = acl.rt.destroy_stream(stream); check_ret("acl.rt.destroy_stream", ret)
-    ret = acl.rt.destroy_context(ctx); check_ret("acl.rt.destroy_context", ret)
-    ret = acl.rt.reset_device(dev_id); check_ret("acl.rt.reset_device", ret)
-    ret = acl.finalize(); check_ret("acl.finalize", ret)
-
-def load_model(model_path):
-    model_id, ret = acl.mdl.load_from_file(model_path); check_ret("acl.mdl.load_from_file", ret)
-    model_desc = acl.mdl.create_desc()
-    ret = acl.mdl.get_desc(model_desc, model_id); check_ret("acl.mdl.get_desc", ret)
-    return model_id, model_desc
-
-def unload_model(model_id, model_desc):
-    ret = acl.mdl.unload(model_id); check_ret("acl.mdl.unload", ret)
-    ret = acl.mdl.destroy_desc(model_desc); check_ret("acl.mdl.destroy_desc", ret)
-
-MODEL_INPUT_SIZE = (640, 640)  # 假设模型输入为640x640
-
-def letterbox(img, new_shape=(640, 640), color=(114, 114, 114)):
-    '''等比例缩放+padding到指定shape，返回新图、缩放比例、padding'''
-    shape = img.size  # PIL: (W, H)
-    ratio = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
-    new_unpad = (int(round(shape[0] * ratio)), int(round(shape[1] * ratio)))
-    dw = new_shape[0] - new_unpad[0]
-    dh = new_shape[1] - new_unpad[1]
-    dw /= 2
-    dh /= 2
-    img = img.resize(new_unpad, Image.BILINEAR)
-    new_img = Image.new('RGB', new_shape, color)
-    new_img.paste(img, (int(dw), int(dh)))
-    return new_img, ratio, dw, dh
-
-def preprocess(image_path):
-    t0 = time.time()
-    img = Image.open(image_path).convert("RGB")
-    img_lb, ratio, dw, dh = letterbox(img, MODEL_INPUT_SIZE)
-    np_img = np.array(img_lb, dtype=np.float32) / 255.0  # HWC, RGB
-    np_img = np_img.transpose(2, 0, 1)[np.newaxis, ...]  # NCHW
-    return np_img, time.time() - t0, img.size, ratio, dw, dh  # (W, H) from PIL
-
-def run_inference(model_id, model_desc, host_x):
+def run_acl_model(model_id, model_desc, host_x):
     input_size = host_x.size * host_x.itemsize
-    input_dev, ret = acl.rt.malloc(input_size, ACL_MEM_MALLOC_NORMAL_ONLY); check_ret("acl.rt.malloc input", ret)
-    ret = acl.rt.memcpy(input_dev, input_size, acl.util.bytes_to_ptr(host_x.tobytes()),
-                        input_size, ACL_MEMCPY_HOST_TO_DEVICE); check_ret("acl.rt.memcpy H2D", ret)
-    input_buf = acl.create_data_buffer(input_dev, input_size)
+    input_device, ret = acl.rt.malloc(input_size, ACL_MEM_MALLOC_NORMAL_ONLY); check_ret("acl.rt.malloc", ret)
+    ret = acl.rt.memcpy(input_device, input_size, acl.util.bytes_to_ptr(host_x.tobytes()),
+                        input_size, ACL_MEMCPY_HOST_TO_DEVICE); check_ret("acl.rt.memcpy", ret)
+    input_buf = acl.create_data_buffer(input_device, input_size)
     input_ds = acl.mdl.create_dataset()
-    _, ret = acl.mdl.add_dataset_buffer(input_ds, input_buf); check_ret("acl.mdl.add_dataset_buffer input", ret)
+    _, ret = acl.mdl.add_dataset_buffer(input_ds, input_buf); check_ret("acl.mdl.add_dataset_buffer", ret)
 
     out_num = acl.mdl.get_num_outputs(model_desc)
     output_ds = acl.mdl.create_dataset()
     out_dev, out_sizes, out_bufs = [], [], []
     for i in range(out_num):
         size_i = acl.mdl.get_output_size_by_index(model_desc, i)
-        dev_i, ret = acl.rt.malloc(size_i, ACL_MEM_MALLOC_NORMAL_ONLY); check_ret("acl.rt.malloc output", ret)
+        dev_i, ret = acl.rt.malloc(size_i, ACL_MEM_MALLOC_NORMAL_ONLY); check_ret("acl.rt.malloc", ret)
         buf_i = acl.create_data_buffer(dev_i, size_i)
-        _, ret = acl.mdl.add_dataset_buffer(output_ds, buf_i); check_ret("acl.mdl.add_dataset_buffer output", ret)
+        _, ret = acl.mdl.add_dataset_buffer(output_ds, buf_i); check_ret("acl.mdl.add_dataset_buffer", ret)
         out_dev.append(dev_i); out_sizes.append(size_i); out_bufs.append(buf_i)
 
-    t0 = time.time()
+    start = time.time()
     ret = acl.mdl.execute(model_id, input_ds, output_ds); check_ret("acl.mdl.execute", ret)
-    infer_time = time.time() - t0
+    infer_time = time.time() - start
 
-    # 只取第一个输出
-    host_out = np.empty(out_sizes[0] // 4, dtype=np.float32)
+    # 输出 shape: (1, 8400, 84)
+    host_out = np.empty((1, 8400, 84), dtype=np.float32)
     ret = acl.rt.memcpy(acl.util.bytes_to_ptr(host_out.tobytes()), out_sizes[0],
                         out_dev[0], out_sizes[0], ACL_MEMCPY_DEVICE_TO_HOST); check_ret("acl.rt.memcpy D2H", ret)
+
     # 释放资源
-    ret = acl.rt.free(input_dev); check_ret("acl.rt.free input", ret)
+    ret = acl.rt.free(input_device); check_ret("acl.rt.free input", ret)
     for dev, buf in zip(out_dev, out_bufs):
         ret = acl.rt.free(dev); check_ret("acl.rt.free output", ret)
         ret = acl.destroy_data_buffer(buf); check_ret("acl.destroy_data_buffer output", ret)
@@ -118,105 +72,96 @@ def run_inference(model_id, model_desc, host_x):
     ret = acl.destroy_data_buffer(input_buf); check_ret("acl.destroy_data_buffer input", ret)
     return host_out, infer_time
 
-def iou(box1, box2):
-    x11, y11, x12, y12 = box1[:4]
-    x21, y21, x22, y22 = box2[:4]
-    xi1, yi1 = max(x11, x21), max(y11, y21)
-    xi2, yi2 = min(x12, x22), min(y12, y22)
-    inter = max(0, xi2 - xi1) * max(0, yi2 - yi1)
-    area1 = max(0, x12 - x11) * max(0, y12 - y11)
-    area2 = max(0, x22 - x21) * max(0, y22 - y21)
-    union = area1 + area2 - inter
-    return inter / union if union > 0 else 0.0
-
-def nms(dets, iou_thresh):
-    kept = []
-    by_cls = {}
-    for d in dets:
-        by_cls.setdefault(d[5], []).append(d)
-    for cls_dets in by_cls.values():
-        cls_dets = sorted(cls_dets, key=lambda x: x[4], reverse=True)
-        while cls_dets:
-            best = cls_dets.pop(0)
-            kept.append(best)
-            cls_dets = [d for d in cls_dets if iou(best, d) < iou_thresh]
-    return kept
-
-def postprocess(raw_out, orig_size, ratio, dw, dh):
-    t0 = time.time()
-    orig_w, orig_h = orig_size
-    arr = raw_out.reshape(YOLO_OUTPUT_SHAPE).squeeze(0)  # (8400, 84)
+def postprocess(pred, print_only=True, orig_img=None):
+    CONF_THRESH = 0.01
+    IOU_THRESH = 0.3
+    arr = pred[0]
+    # 只处理 (1, 8400, 84) 情况
+    arr = arr.squeeze(0)  # (8400, 84)
+    conf_mask = arr[:, 4] > CONF_THRESH
     detections = []
-    input_w, input_h = MODEL_INPUT_SIZE
     for i in range(arr.shape[0]):
-        cx, cy, w, h = arr[i, :4]
-        obj_conf = arr[i, 4]
-        cls_scores = arr[i, 5:]
-        cls_id = int(np.argmax(cls_scores))
-        cls_conf = cls_scores[cls_id]
-        conf = cls_conf * obj_conf
-        if conf < CONF_THRESH:
+        if not conf_mask[i]:
             continue
-        # 1. 先还原到输入尺寸
-        cx *= input_w
-        cy *= input_h
-        w  *= input_w
-        h  *= input_h
-        # 2. 反算到letterbox前的坐标
-        x1 = cx - w / 2
-        y1 = cy - h / 2
-        x2 = cx + w / 2
-        y2 = cy + h / 2
-        # 3. 去除padding，缩放回原图
-        x1 = max(0, min(int((x1 - dw) / ratio), orig_w - 1))
-        y1 = max(0, min(int((y1 - dh) / ratio), orig_h - 1))
-        x2 = max(0, min(int((x2 - dw) / ratio), orig_w - 1))
-        y2 = max(0, min(int((y2 - dh) / ratio), orig_h - 1))
-        detections.append((x1, y1, x2, y2, conf, cls_id))
-    detections = nms(detections, NMS_THRESH)
-    post_time = time.time() - t0
-    return detections, post_time
+        cx, cy, w, h = arr[i, :4]
+        conf = arr[i, 4]
+        cls_scores = arr[i, 5:]
+        class_id = np.argmax(cls_scores)
+        x1 = int(cx - w / 2)
+        y1 = int(cy - h / 2)
+        x2 = int(cx + w / 2)
+        y2 = int(cy + h / 2)
+        detections.append([x1, y1, x2, y2, conf, class_id])
+    # NMS
+    boxes = [d[:4] for d in detections]
+    confs = [d[4] for d in detections]
+    indices = cv2.dnn.NMSBoxes(boxes, confs, CONF_THRESH, IOU_THRESH)
+    if len(indices) == 0:
+        result = []
+    else:
+        if isinstance(indices, np.ndarray):
+            indices = indices.flatten()
+        else:
+            indices = [i[0] if isinstance(i, (list, tuple, np.ndarray)) else i for i in indices]
+        result = [detections[i] for i in indices]
+    # 打印
+    label_count = {}
+    for det in result:
+        cls_id = det[5]
+        label = COCO_LABELS[cls_id]
+        label_count[label] = label_count.get(label, 0) + 1
+    print("识别到的标签及数量:", label_count)
+    print("总数:", len(result))
+    if not print_only and orig_img is not None:
+        img_draw = orig_img.copy()
+        for det in result:
+            x1, y1, x2, y2, conf, cls_id = det
+            label = f"{COCO_LABELS[cls_id]} {conf:.2f}"
+            cv2.rectangle(img_draw, (x1,y1), (x2,y2), (0,255,0), 2)
+            cv2.putText(img_draw, label, (x1,y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
+        cv2.imwrite(SAVE_PATH, cv2.cvtColor(img_draw, cv2.COLOR_RGB2BGR))
+        print(f"已保存结果图片到 {SAVE_PATH}")
 
-def summarize_and_optionally_save(dets, image_path, image_size, save_output):
-    counts = {}
-    for _, _, _, _, conf, cls_id in dets:
-        name = COCO80[cls_id] if cls_id < len(COCO80) else str(cls_id)
-        counts[name] = counts.get(name, 0) + 1
-    print("检测结果：", {k: v for k, v in counts.items()})
-    if not save_output:
-        return
-    img = Image.open(image_path).convert("RGB")
-    np_img = np.array(img)
-    bgr = cv2.cvtColor(np_img, cv2.COLOR_RGB2BGR)
-    for x1, y1, x2, y2, conf, cls_id in dets:
-        name = COCO80[cls_id] if cls_id < len(COCO80) else str(cls_id)
-        cv2.rectangle(bgr, (x1, y1), (x2, y2), (0, 255, 0), 2)
-        cv2.putText(bgr, f"{name} {conf:.2f}", (x1, max(0, y1 - 5)),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
-    cv2.imwrite(OUTPUT_IMAGE_PATH, bgr)
-    print(f"已保存结果到 {OUTPUT_IMAGE_PATH}")
+def main(print_only=True):
+    # 计时：前处理
+    t0 = time.time()
+    img_pil = Image.open(IMAGE_PATH).convert("RGB")
+    img_np = np.array(img_pil)
+    img_input = preprocess(img_np)
+    t1 = time.time()
+    print(f"前处理耗时: {(t1-t0)*1000:.2f} ms")
 
-def main():
-    if not os.path.exists(MODEL_PATH):
-        print(f"模型文件不存在: {MODEL_PATH}")
-        return
-    if not os.path.exists(IMAGE_PATH):
-        print(f"图片不存在: {IMAGE_PATH}")
-        return
+    # ACL初始化与模型加载
+    ret = acl.init(); check_ret("acl.init", ret)
+    dev_id = 0
+    ret = acl.rt.set_device(dev_id); check_ret("acl.rt.set_device", ret)
+    ctx, ret = acl.rt.create_context(dev_id); check_ret("acl.rt.create_context", ret)
+    stream, ret = acl.rt.create_stream(); check_ret("acl.rt.create_stream", ret)
+    model_id, ret = acl.mdl.load_from_file(MODEL_PATH); check_ret("acl.mdl.load_from_file", ret)
+    model_desc = acl.mdl.create_desc()
+    ret = acl.mdl.get_desc(model_desc, model_id); check_ret("acl.mdl.get_desc", ret)
 
-    dev_id, ctx, stream = init_acl()
-    try:
-        model_id, model_desc = load_model(MODEL_PATH)
-        try:
-            img, t_pre, orig_wh, ratio, dw, dh = preprocess(IMAGE_PATH)
-            out, t_inf = run_inference(model_id, model_desc, img)
-            dets, t_post = postprocess(out, orig_wh, ratio, dw, dh)
-            summarize_and_optionally_save(dets, IMAGE_PATH, orig_wh, SAVE_OUTPUT)
-            print(f"耗时: 预处理 {t_pre*1000:.2f} ms, 推理 {t_inf*1000:.2f} ms, 后处理 {t_post*1000:.2f} ms")
-        finally:
-            unload_model(model_id, model_desc)
-    finally:
-        finalize_acl(dev_id, ctx, stream)
+    # 推理
+    t2 = time.time()
+    out, infer_time = run_acl_model(model_id, model_desc, img_input)
+    t3 = time.time()
+    print(f"推理耗时: {infer_time*1000:.2f} ms")
+
+    # 后处理
+    t4 = time.time()
+    postprocess(out, print_only=print_only, orig_img=img_np)
+    t5 = time.time()
+    print(f"后处理耗时: {(t5-t4)*1000:.2f} ms")
+
+    # 释放资源
+    ret = acl.mdl.unload(model_id); check_ret("acl.mdl.unload", ret)
+    ret = acl.mdl.destroy_desc(model_desc); check_ret("acl.mdl.destroy_desc", ret)
+    ret = acl.rt.destroy_stream(stream); check_ret("acl.rt.destroy_stream", ret)
+    ret = acl.rt.destroy_context(ctx); check_ret("acl.rt.destroy_context", ret)
+    ret = acl.rt.reset_device(dev_id); check_ret("acl.rt.reset_device", ret)
+    ret = acl.finalize(); check_ret("acl.finalize", ret)
 
 if __name__ == "__main__":
-    main()
+    # print_only=True 只打印，False则打印并保存图片
+    main(print_only=True)
+    # main(print_only=False)
