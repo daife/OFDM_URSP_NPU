@@ -76,8 +76,6 @@ def postprocess(pred, print_only=True, orig_img=None):
     CONF_THRESH = 0.01
     IOU_THRESH = 0.3
     arr = pred[0]
-    # 只处理 (1, 8400, 84) 情况
-    arr = arr.squeeze(0)  # (8400, 84)
     conf_mask = arr[:, 4] > CONF_THRESH
     detections = []
     for i in range(arr.shape[0]):
@@ -114,11 +112,17 @@ def postprocess(pred, print_only=True, orig_img=None):
     print("总数:", len(result))
     if not print_only and orig_img is not None:
         img_draw = orig_img.copy()
+        h, w = img_draw.shape[:2]
         for det in result:
             x1, y1, x2, y2, conf, cls_id = det
+            # 坐标 clip 到图片范围并转为 int
+            x1 = int(np.clip(x1, 0, w-1))
+            y1 = int(np.clip(y1, 0, h-1))
+            x2 = int(np.clip(x2, 0, w-1))
+            y2 = int(np.clip(y2, 0, h-1))
             label = f"{COCO_LABELS[cls_id]} {conf:.2f}"
-            cv2.rectangle(img_draw, (x1,y1), (x2,y2), (0,255,0), 2)
-            cv2.putText(img_draw, label, (x1,y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
+            cv2.rectangle(img_draw, (x1, y1), (x2, y2), (0,255,0), 2)
+            cv2.putText(img_draw, label, (x1, max(y1-10,0)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
         cv2.imwrite(SAVE_PATH, cv2.cvtColor(img_draw, cv2.COLOR_RGB2BGR))
         print(f"已保存结果图片到 {SAVE_PATH}")
 
