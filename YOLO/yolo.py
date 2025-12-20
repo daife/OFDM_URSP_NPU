@@ -147,6 +147,7 @@ def postprocess(raw_out, orig_size, ratio, dw, dh):
     orig_w, orig_h = orig_size
     arr = raw_out.reshape(YOLO_OUTPUT_SHAPE).squeeze(0)  # (8400, 84)
     detections = []
+    input_w, input_h = MODEL_INPUT_SIZE
     for i in range(arr.shape[0]):
         cx, cy, w, h = arr[i, :4]
         obj_conf = arr[i, 4]
@@ -156,12 +157,17 @@ def postprocess(raw_out, orig_size, ratio, dw, dh):
         conf = cls_conf * obj_conf
         if conf < CONF_THRESH:
             continue
-        # 反算到letterbox前的坐标
-        x1 = (cx - w / 2)
-        y1 = (cy - h / 2)
-        x2 = (cx + w / 2)
-        y2 = (cy + h / 2)
-        # 去除padding，缩放回原图
+        # 1. 先还原到输入尺寸
+        cx *= input_w
+        cy *= input_h
+        w  *= input_w
+        h  *= input_h
+        # 2. 反算到letterbox前的坐标
+        x1 = cx - w / 2
+        y1 = cy - h / 2
+        x2 = cx + w / 2
+        y2 = cy + h / 2
+        # 3. 去除padding，缩放回原图
         x1 = max(0, min(int((x1 - dw) / ratio), orig_w - 1))
         y1 = max(0, min(int((y1 - dh) / ratio), orig_h - 1))
         x2 = max(0, min(int((x2 - dw) / ratio), orig_w - 1))
