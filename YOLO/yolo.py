@@ -79,7 +79,7 @@ class YOLO11NRunner:
         ret = acl.rt.memcpy(acl.util.bytes_to_ptr(host_out.tobytes()), out_sizes[0],
                             out_dev[0], out_sizes[0], ACL_MEMCPY_DEVICE_TO_HOST); check_ret("acl.rt.memcpy D2H", ret)
         print(f"模型输出shape(reshape前): {host_out.shape}")
-        host_out = host_out.reshape(1, 8400, 8)
+        # 不再 reshape，保持扁平，提高性能
 
         ret = acl.rt.free(input_dev); check_ret("acl.rt.free input", ret)
         ret = acl.destroy_data_buffer(input_buf); check_ret("acl.destroy_data_buffer input", ret)
@@ -92,18 +92,15 @@ class YOLO11NRunner:
 
 def postprocess(pred, orig_shape):
     CONF_THRESH = 0.1
-    arr = pred[0]
+    arr = pred.reshape(-1, 84)  # 视图，无拷贝 (8400, 84)
     detections = []
     for i in range(arr.shape[0]):
-        conf = arr[i, 4]
-        if conf < CONF_THRESH:
-            continue
-        cx, cy, w, h = arr[i, :4]
-        cls_scores = arr[i, 5:9]
+        cls_scores = arr[i, 4:]
         cls_id = int(np.argmax(cls_scores))
         score = cls_scores[cls_id]
         if score < CONF_THRESH:
             continue
+        cx, cy, w, h = arr[i, :4]
         x1 = int(cx - w / 2)
         y1 = int(cy - h / 2)
         x2 = int(cx + w / 2)
