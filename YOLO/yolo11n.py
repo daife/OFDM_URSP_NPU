@@ -45,10 +45,10 @@ def load_image(image_path):
     img = Image.open(image_path).convert('RGB')
     img_np = np.array(img)
     # 转为NCHW, 归一化
-    img_np = img_np.transpose(2, 0, 1)[np.newaxis].astype(np.float32) / 255
+    img_np = img_np.transpose(2, 0, 1)[np.newaxis].astype(np.float32)/255
     return img_np, np.array(img)
 
-def postprocess(pred, conf_thresh=0.00001, iou_thresh=0.1):
+def postprocess(pred, conf_thresh=0.00001, iou_thresh=0.9):
     arr = pred[0]
     # 只处理(1, 84, 8400)情况
     if arr.shape == (1, 84, 8400):
