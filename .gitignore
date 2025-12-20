@@ -37,3 +37,4 @@ dft256_mat_1192.onnx
 dft256_mat_1192.onnx.data
 idft256_mat_1192.onnx
 idft256_mat_1192.onnx.data
+yolo11n.onnx
