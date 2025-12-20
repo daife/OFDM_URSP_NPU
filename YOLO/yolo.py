@@ -14,8 +14,8 @@ ACL_MEM_MALLOC_NORMAL_ONLY = 0
 ACL_MEMCPY_HOST_TO_DEVICE = 0
 ACL_MEMCPY_DEVICE_TO_HOST = 1
 ACL_SUCCESS = 0
-CONF_THRESH = 0.65
-YOLO_OUTPUT_SHAPE = (1, 8400, 85)  # (batch, anchors, 4+1+80)
+CONF_THRESH = 0.9
+YOLO_OUTPUT_SHAPE = (1, 8400, 84)  # (batch, anchors, 4+80)
 
 COCO80 = [
     "person","bicycle","car","motorcycle","airplane","bus","train","truck","boat","traffic light",
@@ -103,7 +103,7 @@ def run_inference(model_id, model_desc, host_x):
 def postprocess(raw_out, image_size):
     t0 = time.time()
     arr = raw_out.reshape(YOLO_OUTPUT_SHAPE)
-    arr = arr.squeeze(0)  # (8400, 85)
+    arr = arr.squeeze(0)  # (8400, 84)
     detections = []
     for i in range(arr.shape[0]):
         cx, cy, w, h = arr[i, :4]
