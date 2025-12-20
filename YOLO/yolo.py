@@ -72,23 +72,31 @@ def run_acl_model(model_id, model_desc, host_x):
     ret = acl.destroy_data_buffer(input_buf); check_ret("acl.destroy_data_buffer input", ret)
     return host_out, infer_time
 
-def postprocess(pred, print_only=True, orig_img=None):
+def postprocess(pred, print_only=True, orig_img=None, pad_info=None):
     CONF_THRESH = 0.01
     IOU_THRESH = 0.3
     arr = pred[0]
     conf_mask = arr[:, 4] > CONF_THRESH
     detections = []
+    h, w = orig_img.shape[:2] if orig_img is not None else (640, 640)
+    # pad_info: (top, left, scale)
+    pad_top, pad_left, scale = pad_info if pad_info is not None else (0, 0, 1.0)
     for i in range(arr.shape[0]):
         if not conf_mask[i]:
             continue
-        cx, cy, w, h = arr[i, :4]
+        cx, cy, bw, bh = arr[i, :4]
         conf = arr[i, 4]
         cls_scores = arr[i, 5:]
         class_id = np.argmax(cls_scores)
-        x1 = int(cx - w / 2)
-        y1 = int(cy - h / 2)
-        x2 = int(cx + w / 2)
-        y2 = int(cy + h / 2)
+        # 坐标还原到原图
+        cx = (cx - pad_left) / scale
+        cy = (cy - pad_top) / scale
+        bw = bw / scale
+        bh = bh / scale
+        x1 = int(cx - bw / 2)
+        y1 = int(cy - bh / 2)
+        x2 = int(cx + bw / 2)
+        y2 = int(cy + bh / 2)
         detections.append([x1, y1, x2, y2, conf, class_id])
     # NMS
     boxes = [d[:4] for d in detections]
@@ -112,14 +120,13 @@ def postprocess(pred, print_only=True, orig_img=None):
     print("总数:", len(result))
     if not print_only and orig_img is not None:
         img_draw = orig_img.copy()
-        h, w = img_draw.shape[:2]
         for det in result:
             x1, y1, x2, y2, conf, cls_id = det
-            # 参考 example.py，确保坐标为 int 且在图片范围内
-            x1 = max(0, min(int(round(x1)), w - 1))
-            y1 = max(0, min(int(round(y1)), h - 1))
-            x2 = max(0, min(int(round(x2)), w - 1))
-            y2 = max(0, min(int(round(y2)), h - 1))
+            # 坐标 clip 到图片范围
+            x1 = max(0, min(x1, w - 1))
+            y1 = max(0, min(y1, h - 1))
+            x2 = max(0, min(x2, w - 1))
+            y2 = max(0, min(y2, h - 1))
             label = f"{COCO_LABELS[cls_id]} {conf:.2f}"
             cv2.rectangle(img_draw, (x1, y1), (x2, y2), (0,255,0), 2)
             text_y = max(y1 - 10, 0)
@@ -132,6 +139,14 @@ def main(print_only=True):
     t0 = time.time()
     img_pil = Image.open(IMAGE_PATH).convert("RGB")
     img_np = np.array(img_pil)
+    # 计算 pad_info
+    h, w = img_np.shape[:2]
+    input_size = 640
+    scale = min(input_size/w, input_size/h)
+    nh, nw = int(h*scale), int(w*scale)
+    top = (input_size - nh) // 2
+    left = (input_size - nw) // 2
+    pad_info = (top, left, scale)
     img_input = preprocess(img_np)
     t1 = time.time()
     print(f"前处理耗时: {(t1-t0)*1000:.2f} ms")
@@ -154,7 +169,7 @@ def main(print_only=True):
 
     # 后处理
     t4 = time.time()
-    postprocess(out, print_only=print_only, orig_img=img_np)
+    postprocess(out, print_only=print_only, orig_img=img_np, pad_info=pad_info)
     t5 = time.time()
     print(f"后处理耗时: {(t5-t4)*1000:.2f} ms")
 
