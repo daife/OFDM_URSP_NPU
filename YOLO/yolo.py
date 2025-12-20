@@ -76,7 +76,7 @@ class YOLO11NRunner:
         infer_time = (time.time() - start) * 1000
 
         host_out = np.empty(out_sizes[0] // 4, dtype=np.float32)
-        ret = acl.rt.memcpy(acl.util.bytes_to_ptr(host_out.tobytes()), out_sizes[0],
+        ret = acl.rt.memcpy(acl.util.numpy_to_ptr(host_out), out_sizes[0],
                             out_dev[0], out_sizes[0], ACL_MEMCPY_DEVICE_TO_HOST); check_ret("acl.rt.memcpy D2H", ret)
         print(f"模型输出shape(reshape前): {host_out.shape}")
         # 不再 reshape，保持扁平，提高性能
@@ -98,9 +98,11 @@ def postprocess(pred, orig_shape):
         cls_scores = arr[i, 4:]
         cls_id = int(np.argmax(cls_scores))
         score = cls_scores[cls_id]
-        if score < CONF_THRESH:
+        if score < CONF_THRESH or not np.isfinite(score):
             continue
         cx, cy, w, h = arr[i, :4]
+        if not np.all(np.isfinite([cx, cy, w, h])):
+            continue
         x1 = int(cx - w / 2)
         y1 = int(cy - h / 2)
         x2 = int(cx + w / 2)
