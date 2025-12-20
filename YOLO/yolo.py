@@ -9,6 +9,7 @@ MODEL_PATH = "./yolo11n.om"
 IMAGE_PATH = "./YOLO/tst.jpg"
 SAVE_RESULT = True  # False=仅打印; True=打印并保存标注图
 OUTPUT_PATH = "./YOLO/tst_out.jpg"
+INPUT_SIZE = 640
 
 ACL_MEM_MALLOC_NORMAL_ONLY = 0
 ACL_MEMCPY_HOST_TO_DEVICE = 0
@@ -90,28 +91,63 @@ class YOLO11NRunner:
         ret = acl.mdl.destroy_dataset(output_ds); check_ret("acl.mdl.destroy_dataset output", ret)
         return host_out, infer_time
 
-def postprocess(pred, orig_shape):
-    CONF_THRESH = 0.65
-    arr = pred.reshape(-1, 84)  # 视图，无拷贝 (8400, 84)
+def preprocess(image_rgb, input_size=INPUT_SIZE):
+    """保持宽高比缩放 + 填充灰边，返回模型输入、原始尺寸和填充信息"""
+    h, w = image_rgb.shape[:2]
+    scale = min(input_size / w, input_size / h)
+    nw, nh = int(w * scale), int(h * scale)
+    resized = cv2.resize(image_rgb, (nw, nh))
+    top = (input_size - nh) // 2
+    bottom = input_size - nh - top
+    left = (input_size - nw) // 2
+    right = input_size - nw - left
+    padded = cv2.copyMakeBorder(resized, top, bottom, left, right, cv2.BORDER_CONSTANT, value=(114, 114, 114))
+    inp = padded.transpose(2, 0, 1)[np.newaxis].astype(np.float32) / 255.0
+    return inp, (h, w), (top, left, scale)
+
+def postprocess(pred, orig_shape, pad_info):
+    """每类保留最高分框，坐标反归一到原图"""
+    CONF_THRESH = 0.1
+    arr = np.asarray(pred)
+    if arr.ndim == 1:
+        if arr.size % 8 != 0:
+            raise ValueError(f"Unexpected pred size {arr.size}, cannot reshape to Nx8")
+        arr = arr.reshape(1, -1, 8)
+    if arr.ndim == 2:
+        if arr.shape[1] != 8:
+            raise ValueError(f"Unexpected pred shape {arr.shape}, expect (*,8)")
+        arr = arr[np.newaxis, ...]
+    arr = arr[0]
     detections = []
+    top, left, scale = pad_info
     for i in range(arr.shape[0]):
-        cls_scores = arr[i, 4:]
-        cls_id = int(np.argmax(cls_scores))
-        score = cls_scores[cls_id]
+        conf = arr[i, 4]
+        if conf < CONF_THRESH:
+            continue
+        cls_scores = arr[i, 5:]
+        if cls_scores.size == 0:
+            continue
+        class_id = int(np.argmax(cls_scores))
+        score = cls_scores[class_id]
         if score < CONF_THRESH or not np.isfinite(score):
             continue
         cx, cy, w, h = arr[i, :4]
         if not np.all(np.isfinite([cx, cy, w, h])):
             continue
+        cx = (cx - left) / scale
+        cy = (cy - top) / scale
+        w = w / scale
+        h = h / scale
         x1 = int(cx - w / 2)
         y1 = int(cy - h / 2)
         x2 = int(cx + w / 2)
         y2 = int(cy + h / 2)
-        detections.append([x1, y1, x2, y2, score, cls_id])
+        detections.append([x1, y1, x2, y2, float(score), class_id])
     best = {}
     for det in detections:
-        if (det[5] not in best) or (det[4] > best[det[5]][4]):
-            best[det[5]] = det
+        cls_id = det[5]
+        if (cls_id not in best) or (det[4] > best[cls_id][4]):
+            best[cls_id] = det
     return list(best.values())
 
 def draw_and_save(image_rgb, detections, path):
@@ -120,9 +156,10 @@ def draw_and_save(image_rgb, detections, path):
     img_bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
     h, w = img_bgr.shape[:2]
     for det in detections:
-        if len(det) < 4:
+        if len(det) < 6:
             continue
-        x1, y1, x2, y2 = [int(round(v)) for v in det[:4]]
+        x1, y1, x2, y2, score, cls_id = det
+        x1, y1, x2, y2 = [int(round(v)) for v in (x1, y1, x2, y2)]
         x1 = np.clip(x1, 0, w - 1)
         y1 = np.clip(y1, 0, h - 1)
         x2 = np.clip(x2, 0, w - 1)
@@ -130,6 +167,9 @@ def draw_and_save(image_rgb, detections, path):
         if x2 <= x1 or y2 <= y1:
             continue
         cv2.rectangle(img_bgr, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        label = f"{cls_id} {score:.2f}"
+        cv2.putText(img_bgr, label, (x1, max(0, y1 - 10)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
     cv2.imwrite(path, img_bgr)
 
 def main():
@@ -145,14 +185,14 @@ def main():
     try:
         t0 = time.time()
         img = Image.open(IMAGE_PATH).convert("RGB")
-        np_img = np.array(img).astype(np.float32) / 255.0
-        input_tensor = np_img.transpose(2, 0, 1)[np.newaxis, ...]
+        np_img_uint8 = np.array(img, dtype=np.uint8)
+        input_tensor, orig_shape, pad_info = preprocess(np_img_uint8)
         t_pre = (time.time() - t0) * 1000
 
         pred, t_inf = runner.infer(input_tensor)
 
         t1 = time.time()
-        detections = postprocess(pred, np_img.shape[:2])
+        detections = postprocess(pred, orig_shape, pad_info)
         t_post = (time.time() - t1) * 1000
 
         counts = {}
@@ -161,7 +201,7 @@ def main():
         print(f"检测结果: {counts}, 预处理 {t_pre:.2f}ms, 推理 {t_inf:.2f}ms, 后处理 {t_post:.2f}ms")
 
         if SAVE_RESULT:
-            draw_and_save(np_img.astype(np.uint8), detections, OUTPUT_PATH)
+            draw_and_save(np_img_uint8.copy(), detections, OUTPUT_PATH)
             print(f"结果已保存: {os.path.abspath(OUTPUT_PATH)}")
     finally:
         runner.unload()
