@@ -4,6 +4,30 @@ from PIL import Image
 import cv2
 from acllite_model import AclLiteModel
 
+import acl
+from acllite_resource import resource_list
+
+class AclLiteResource:
+    def __init__(self, device_id=0):
+        self.device_id = device_id
+        self.context = None
+        self.stream = None
+
+    def init(self):
+        acl.init()
+        acl.rt.set_device(self.device_id)
+        self.context, _ = acl.rt.create_context(self.device_id)
+        self.stream, _ = acl.rt.create_stream()
+
+    def __del__(self):
+        resource_list.destroy()
+        if self.stream:
+            acl.rt.destroy_stream(self.stream)
+        if self.context:
+            acl.rt.destroy_context(self.context)
+        acl.rt.reset_device(self.device_id)
+        acl.finalize()
+
 # COCO 80类标签
 COCO_CLASSES = [
     "person","bicycle","car","motorcycle","airplane","bus","train","truck","boat","traffic light",
@@ -72,41 +96,50 @@ def main(mode="print"):  # mode: "print" or "save"
     MODEL_PATH = "./yolo11n.om"
     IMAGE_PATH = "./YOLO/tst.jpg"
 
-    # 1. 读取图片
-    t0 = time.time()
-    img, img_for_draw = load_image(IMAGE_PATH)
-    t1 = time.time()
+    # ACL初始化
+    acl_resource = AclLiteResource()
+    acl_resource.init()
 
-    # 2. 加载模型
-    model = AclLiteModel(MODEL_PATH)
+    try:
+        # 1. 读取图片
+        t0 = time.time()
+        img, img_for_draw = load_image(IMAGE_PATH)
+        t1 = time.time()
 
-    # 3. 推理
-    t2 = time.time()
-    pred = model.execute([img])
-    t3 = time.time()
+        # 2. 加载模型
+        model = AclLiteModel(MODEL_PATH)
 
-    # 4. 后处理
-    detections = postprocess(pred)
-    t4 = time.time()
+        # 3. 推理
+        t2 = time.time()
+        pred = model.execute([img])
+        t3 = time.time()
 
-    # 5. 统计标签
-    label_count = {}
-    for det in detections:
-        cls_id = det[5]
-        label = COCO_CLASSES[cls_id]
-        label_count[label] = label_count.get(label, 0) + 1
+        # 4. 后处理
+        detections = postprocess(pred)
+        t4 = time.time()
 
-    # 6. 打印
-    print("识别到的标签及数量:", label_count)
-    print(f"前处理耗时: {(t1-t0)*1000:.2f} ms, 推理耗时: {(t3-t2)*1000:.2f} ms, 后处理耗时: {(t4-t3)*1000:.2f} ms")
+        # 5. 统计标签
+        label_count = {}
+        for det in detections:
+            cls_id = det[5]
+            label = COCO_CLASSES[cls_id]
+            label_count[label] = label_count.get(label, 0) + 1
 
-    if mode == "save":
-        img_draw = draw_boxes(img_for_draw.copy(), detections)
-        save_path = "./YOLO/tst_result.jpg"
-        cv2.imwrite(save_path, cv2.cvtColor(img_draw, cv2.COLOR_RGB2BGR))
-        print(f"结果已保存到: {save_path}")
+        # 6. 打印
+        print("识别到的标签及数量:", label_count)
+        print(f"前处理耗时: {(t1-t0)*1000:.2f} ms, 推理耗时: {(t3-t2)*1000:.2f} ms, 后处理耗时: {(t4-t3)*1000:.2f} ms")
+
+        if mode == "save":
+            img_draw = draw_boxes(img_for_draw.copy(), detections)
+            save_path = "./YOLO/tst_result.jpg"
+            cv2.imwrite(save_path, cv2.cvtColor(img_draw, cv2.COLOR_RGB2BGR))
+            print(f"结果已保存到: {save_path}")
+    finally:
+        # 资源释放
+        del acl_resource
 
 if __name__ == "__main__":
     # 仅打印: main("print")
     # 打印并保存: main("save")
-    main("print")
+    # main("print")
+    main("save")
