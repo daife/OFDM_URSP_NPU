@@ -115,14 +115,15 @@ def postprocess(pred, print_only=True, orig_img=None):
         h, w = img_draw.shape[:2]
         for det in result:
             x1, y1, x2, y2, conf, cls_id = det
-            # 坐标 clip 到图片范围并转为 int
-            x1 = int(np.clip(x1, 0, w-1))
-            y1 = int(np.clip(y1, 0, h-1))
-            x2 = int(np.clip(x2, 0, w-1))
-            y2 = int(np.clip(y2, 0, h-1))
+            # 参考 example.py，确保坐标为 int 且在图片范围内
+            x1 = max(0, min(int(round(x1)), w - 1))
+            y1 = max(0, min(int(round(y1)), h - 1))
+            x2 = max(0, min(int(round(x2)), w - 1))
+            y2 = max(0, min(int(round(y2)), h - 1))
             label = f"{COCO_LABELS[cls_id]} {conf:.2f}"
             cv2.rectangle(img_draw, (x1, y1), (x2, y2), (0,255,0), 2)
-            cv2.putText(img_draw, label, (x1, max(y1-10,0)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
+            text_y = max(y1 - 10, 0)
+            cv2.putText(img_draw, label, (x1, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
         cv2.imwrite(SAVE_PATH, cv2.cvtColor(img_draw, cv2.COLOR_RGB2BGR))
         print(f"已保存结果图片到 {SAVE_PATH}")
 
