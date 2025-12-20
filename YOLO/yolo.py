@@ -15,6 +15,7 @@ ACL_MEMCPY_HOST_TO_DEVICE = 0
 ACL_MEMCPY_DEVICE_TO_HOST = 1
 ACL_SUCCESS = 0
 CONF_THRESH = 0.9
+NMS_THRESH = 0.45
 YOLO_OUTPUT_SHAPE = (1, 8400, 84)  # (batch, anchors, 4+80)
 
 COCO80 = [
@@ -100,10 +101,37 @@ def run_inference(model_id, model_desc, host_x):
     ret = acl.destroy_data_buffer(input_buf); check_ret("acl.destroy_data_buffer input", ret)
     return host_out, infer_time
 
-def postprocess(raw_out, image_size):
+def iou(box1, box2):
+    x11, y11, x12, y12 = box1[:4]
+    x21, y21, x22, y22 = box2[:4]
+    xi1, yi1 = max(x11, x21), max(y11, y21)
+    xi2, yi2 = min(x12, x22), min(y12, y22)
+    inter = max(0, xi2 - xi1) * max(0, yi2 - yi1)
+    area1 = max(0, x12 - x11) * max(0, y12 - y11)
+    area2 = max(0, x22 - x21) * max(0, y22 - y21)
+    union = area1 + area2 - inter
+    return inter / union if union > 0 else 0.0
+
+def nms(dets, iou_thresh):
+    kept = []
+    by_cls = {}
+    for d in dets:
+        by_cls.setdefault(d[5], []).append(d)
+    for cls_dets in by_cls.values():
+        cls_dets = sorted(cls_dets, key=lambda x: x[4], reverse=True)
+        while cls_dets:
+            best = cls_dets.pop(0)
+            kept.append(best)
+            cls_dets = [d for d in cls_dets if iou(best, d) < iou_thresh]
+    return kept
+
+def postprocess(raw_out, orig_size, input_size):
     t0 = time.time()
-    arr = raw_out.reshape(YOLO_OUTPUT_SHAPE)
-    arr = arr.squeeze(0)  # (8400, 84)
+    in_h, in_w = input_size
+    orig_w, orig_h = orig_size
+    scale_x = orig_w / in_w
+    scale_y = orig_h / in_h
+    arr = raw_out.reshape(YOLO_OUTPUT_SHAPE).squeeze(0)  # (8400, 84)
     detections = []
     for i in range(arr.shape[0]):
         cx, cy, w, h = arr[i, :4]
@@ -114,11 +142,12 @@ def postprocess(raw_out, image_size):
         conf = cls_conf * obj_conf
         if conf < CONF_THRESH:
             continue
-        x1 = int(cx - w / 2)
-        y1 = int(cy - h / 2)
-        x2 = int(cx + w / 2)
-        y2 = int(cy + h / 2)
+        x1 = max(0, min(int((cx - w / 2) * scale_x), orig_w - 1))
+        y1 = max(0, min(int((cy - h / 2) * scale_y), orig_h - 1))
+        x2 = max(0, min(int((cx + w / 2) * scale_x), orig_w - 1))
+        y2 = max(0, min(int((cy + h / 2) * scale_y), orig_h - 1))
         detections.append((x1, y1, x2, y2, conf, cls_id))
+    detections = nms(detections, NMS_THRESH)
     post_time = time.time() - t0
     return detections, post_time
 
@@ -136,7 +165,7 @@ def summarize_and_optionally_save(dets, image_path, image_size, save_output):
     for x1, y1, x2, y2, conf, cls_id in dets:
         name = COCO80[cls_id] if cls_id < len(COCO80) else str(cls_id)
         cv2.rectangle(bgr, (x1, y1), (x2, y2), (0, 255, 0), 2)
-        cv2.putText(bgr, f"{name} {CONF_THRESH:.2f}", (x1, max(0, y1 - 5)),
+        cv2.putText(bgr, f"{name} {conf:.2f}", (x1, max(0, y1 - 5)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
     cv2.imwrite(OUTPUT_IMAGE_PATH, bgr)
     print(f"已保存结果到 {OUTPUT_IMAGE_PATH}")
@@ -153,10 +182,10 @@ def main():
     try:
         model_id, model_desc = load_model(MODEL_PATH)
         try:
-            img, t_pre, _ = preprocess(IMAGE_PATH)
+            img, t_pre, orig_wh = preprocess(IMAGE_PATH)
             out, t_inf = run_inference(model_id, model_desc, img)
-            dets, t_post = postprocess(out, img.shape[-2:])
-            summarize_and_optionally_save(dets, IMAGE_PATH, img.shape[-2:], SAVE_OUTPUT)
+            dets, t_post = postprocess(out, orig_wh, img.shape[-2:])
+            summarize_and_optionally_save(dets, IMAGE_PATH, orig_wh, SAVE_OUTPUT)
             print(f"耗时: 预处理 {t_pre*1000:.2f} ms, 推理 {t_inf*1000:.2f} ms, 后处理 {t_post*1000:.2f} ms")
         finally:
             unload_model(model_id, model_desc)
