@@ -72,11 +72,13 @@ def run_acl_model(model_id, model_desc, host_x):
     ret = acl.destroy_data_buffer(input_buf); check_ret("acl.destroy_data_buffer input", ret)
     return host_out, infer_time
 
-def postprocess(pred, conf_thresh=0.0005, iou_thresh=0.5, orig_img=None):
+def postprocess(pred, conf_thresh=0.0005, iou_thresh=0.5):
     arr = pred[0]
-    # 只处理(1, 8400, 84)情况
-    if arr.shape == (1, 8400, 84):
-        arr = arr.transpose(0, 2, 1)  # (1, 84, 8400)
+    # 只处理(1, 8400, 84)或(1, 84, 8400)情况
+    if arr.shape == (1, 84, 8400):
+        arr = arr.transpose(0, 2, 1)  # (1, 8400, 84)
+        arr = arr[0]
+    elif arr.shape == (1, 8400, 84):
         arr = arr[0]
     elif arr.shape == (8400, 84):
         # 已经是(8400, 84)
@@ -104,49 +106,28 @@ def postprocess(pred, conf_thresh=0.0005, iou_thresh=0.5, orig_img=None):
     scores = [d[4] for d in detections]
     indices = cv2.dnn.NMSBoxes(boxes, scores, conf_thresh, iou_thresh)
     if len(indices) == 0:
-        result = []
+        return []
+    if isinstance(indices, np.ndarray):
+        indices = indices.flatten()
     else:
-        if isinstance(indices, np.ndarray):
-            indices = indices.flatten()
-        else:
-            indices = [i[0] if isinstance(i, (list, tuple, np.ndarray)) else i for i in indices]
-        result = [detections[i] for i in indices]
-    # 统计标签
-    label_count = {}
-    for det in result:
-        cls_id = det[5]
-        label = COCO_LABELS[cls_id]
-        label_count[label] = label_count.get(label, 0) + 1
-    print("识别到的标签及数量:", label_count)
-    print("总数:", len(result))
-    # 可选画框保存
-    if orig_img is not None:
-        img_draw = orig_img.copy()
-        for det in result:
-            x1, y1, x2, y2, score, cls_id = det
-            label = f"{COCO_LABELS[cls_id]} {score:.2f}"
-            cv2.rectangle(img_draw, (x1, y1), (x2, y2), (0,255,0), 2)
-            text_y = max(y1 - 10, 0)
-            cv2.putText(img_draw, label, (x1, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
-        cv2.imwrite(SAVE_PATH, cv2.cvtColor(img_draw, cv2.COLOR_RGB2BGR))
-        print(f"已保存结果图片到 {SAVE_PATH}")
+        indices = [i[0] if isinstance(i, (list, tuple, np.ndarray)) else i for i in indices]
+    return [detections[i] for i in indices]
 
-def main(print_only=True):
+def draw_boxes(img, detections):
+    for det in detections:
+        x1, y1, x2, y2, score, cls_id = det
+        label = f"{COCO_LABELS[cls_id]} {score:.2f}"
+        cv2.rectangle(img, (x1, y1), (x2, y2), (0,255,0), 2)
+        cv2.putText(img, label, (x1, max(y1-10, 0)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
+    return img
+
+def main(mode="print"):  # mode: "print" or "save"
     # 计时：前处理
     t0 = time.time()
     img_pil = Image.open(IMAGE_PATH).convert("RGB")
     img_np = np.array(img_pil)
-    # 计算 pad_info
-    h, w = img_np.shape[:2]
-    input_size = 640
-    scale = min(input_size/w, input_size/h)
-    nh, nw = int(h*scale), int(w*scale)
-    top = (input_size - nh) // 2
-    left = (input_size - nw) // 2
-    pad_info = (top, left, scale)
-    img_input = preprocess(img_np)
+    img_input = img_np.transpose(2,0,1)[np.newaxis].astype(np.float32)/255
     t1 = time.time()
-    print(f"前处理耗时: {(t1-t0)*1000:.2f} ms")
 
     # ACL初始化与模型加载
     ret = acl.init(); check_ret("acl.init", ret)
@@ -162,13 +143,26 @@ def main(print_only=True):
     t2 = time.time()
     out, infer_time = run_acl_model(model_id, model_desc, img_input)
     t3 = time.time()
-    print(f"推理耗时: {infer_time*1000:.2f} ms")
 
     # 后处理
+    detections = postprocess(out)
     t4 = time.time()
-    postprocess(out, conf_thresh=0.0005, iou_thresh=0.5, orig_img=img_np if not print_only else None)
-    t5 = time.time()
-    print(f"后处理耗时: {(t5-t4)*1000:.2f} ms")
+
+    # 统计标签
+    label_count = {}
+    for det in detections:
+        cls_id = det[5]
+        label = COCO_LABELS[cls_id]
+        label_count[label] = label_count.get(label, 0) + 1
+
+    # 打印
+    print("识别到的标签及数量:", label_count)
+    print(f"前处理耗时: {(t1-t0)*1000:.2f} ms, 推理耗时: {(t3-t2)*1000:.2f} ms, 后处理耗时: {(t4-t3)*1000:.2f} ms")
+
+    if mode == "save":
+        img_draw = draw_boxes(img_np.copy(), detections)
+        cv2.imwrite(SAVE_PATH, cv2.cvtColor(img_draw, cv2.COLOR_RGB2BGR))
+        print(f"结果已保存到: {SAVE_PATH}")
 
     # 释放资源
     ret = acl.mdl.unload(model_id); check_ret("acl.mdl.unload", ret)
@@ -179,6 +173,7 @@ def main(print_only=True):
     ret = acl.finalize(); check_ret("acl.finalize", ret)
 
 if __name__ == "__main__":
-    # print_only=True 只打印，False则打印并保存图片
-    main(print_only=True)
-    # main(print_only=False)
+    # 仅打印: main("print")
+    # 打印并保存: main("save")
+    main("print")
+    # main("save")
