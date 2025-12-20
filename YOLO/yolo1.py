@@ -44,7 +44,7 @@ COCO_CLASSES = [
 def load_image(image_path):
     img = Image.open(image_path).convert('RGB')
     img_np = np.array(img)
-    # 转为NCHW, 归一化
+    # 转为NCHW格式，float32
     img_np = img_np.transpose(2, 0, 1)[np.newaxis].astype(np.float32)/255
     return img_np, np.array(img)
 
