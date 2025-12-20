@@ -72,36 +72,37 @@ def run_acl_model(model_id, model_desc, host_x):
     ret = acl.destroy_data_buffer(input_buf); check_ret("acl.destroy_data_buffer input", ret)
     return host_out, infer_time
 
-def postprocess(pred, print_only=True, orig_img=None, pad_info=None):
-    CONF_THRESH = 0.01
-    IOU_THRESH = 0.3
+def postprocess(pred, conf_thresh=0.0005, iou_thresh=0.5, orig_img=None):
     arr = pred[0]
-    conf_mask = arr[:, 4] > CONF_THRESH
+    # 只处理(1, 8400, 84)情况
+    if arr.shape == (1, 8400, 84):
+        arr = arr.transpose(0, 2, 1)  # (1, 84, 8400)
+        arr = arr[0]
+    elif arr.shape == (8400, 84):
+        # 已经是(8400, 84)
+        pass
+    else:
+        raise ValueError(f"Unexpected pred shape: {arr.shape}")
+    conf_mask = arr[:, 4] > conf_thresh
     detections = []
-    h, w = orig_img.shape[:2] if orig_img is not None else (640, 640)
-    # pad_info: (top, left, scale)
-    pad_top, pad_left, scale = pad_info if pad_info is not None else (0, 0, 1.0)
     for i in range(arr.shape[0]):
         if not conf_mask[i]:
             continue
-        cx, cy, bw, bh = arr[i, :4]
+        cx, cy, w, h = arr[i, :4]
         conf = arr[i, 4]
         cls_scores = arr[i, 5:]
         class_id = np.argmax(cls_scores)
-        # 坐标还原到原图
-        cx = (cx - pad_left) / scale
-        cy = (cy - pad_top) / scale
-        bw = bw / scale
-        bh = bh / scale
-        x1 = int(cx - bw / 2)
-        y1 = int(cy - bh / 2)
-        x2 = int(cx + bw / 2)
-        y2 = int(cy + bh / 2)
-        detections.append([x1, y1, x2, y2, conf, class_id])
-    # NMS
+        score = conf * cls_scores[class_id]
+        if score < conf_thresh:
+            continue
+        x1 = int(cx - w / 2)
+        y1 = int(cy - h / 2)
+        x2 = int(cx + w / 2)
+        y2 = int(cy + h / 2)
+        detections.append([x1, y1, x2, y2, float(score), int(class_id)])
     boxes = [d[:4] for d in detections]
-    confs = [d[4] for d in detections]
-    indices = cv2.dnn.NMSBoxes(boxes, confs, CONF_THRESH, IOU_THRESH)
+    scores = [d[4] for d in detections]
+    indices = cv2.dnn.NMSBoxes(boxes, scores, conf_thresh, iou_thresh)
     if len(indices) == 0:
         result = []
     else:
@@ -110,7 +111,7 @@ def postprocess(pred, print_only=True, orig_img=None, pad_info=None):
         else:
             indices = [i[0] if isinstance(i, (list, tuple, np.ndarray)) else i for i in indices]
         result = [detections[i] for i in indices]
-    # 打印
+    # 统计标签
     label_count = {}
     for det in result:
         cls_id = det[5]
@@ -118,16 +119,12 @@ def postprocess(pred, print_only=True, orig_img=None, pad_info=None):
         label_count[label] = label_count.get(label, 0) + 1
     print("识别到的标签及数量:", label_count)
     print("总数:", len(result))
-    if not print_only and orig_img is not None:
+    # 可选画框保存
+    if orig_img is not None:
         img_draw = orig_img.copy()
         for det in result:
-            x1, y1, x2, y2, conf, cls_id = det
-            # 坐标 clip 到图片范围
-            x1 = max(0, min(x1, w - 1))
-            y1 = max(0, min(y1, h - 1))
-            x2 = max(0, min(x2, w - 1))
-            y2 = max(0, min(y2, h - 1))
-            label = f"{COCO_LABELS[cls_id]} {conf:.2f}"
+            x1, y1, x2, y2, score, cls_id = det
+            label = f"{COCO_LABELS[cls_id]} {score:.2f}"
             cv2.rectangle(img_draw, (x1, y1), (x2, y2), (0,255,0), 2)
             text_y = max(y1 - 10, 0)
             cv2.putText(img_draw, label, (x1, text_y), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
@@ -169,7 +166,7 @@ def main(print_only=True):
 
     # 后处理
     t4 = time.time()
-    postprocess(out, print_only=print_only, orig_img=img_np, pad_info=pad_info)
+    postprocess(out, conf_thresh=0.0005, iou_thresh=0.5, orig_img=img_np if not print_only else None)
     t5 = time.time()
     print(f"后处理耗时: {(t5-t4)*1000:.2f} ms")
 
