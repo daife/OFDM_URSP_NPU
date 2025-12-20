@@ -7,7 +7,7 @@ from PIL import Image
 
 MODEL_PATH = "./yolo11n.om"
 IMAGE_PATH = "./YOLO/tst.jpg"
-SAVE_RESULT = False  # False=仅打印; True=打印并保存标注图
+SAVE_RESULT = True  # False=仅打印; True=打印并保存标注图
 OUTPUT_PATH = "./YOLO/tst_out.jpg"
 
 ACL_MEM_MALLOC_NORMAL_ONLY = 0
@@ -78,8 +78,8 @@ class YOLO11NRunner:
         host_out = np.empty(out_sizes[0] // 4, dtype=np.float32)
         ret = acl.rt.memcpy(acl.util.bytes_to_ptr(host_out.tobytes()), out_sizes[0],
                             out_dev[0], out_sizes[0], ACL_MEMCPY_DEVICE_TO_HOST); check_ret("acl.rt.memcpy D2H", ret)
-        host_out = host_out.reshape(1, 8400, 84)
-        print(f"模型输出shape: {host_out.shape}")
+        print(f"模型输出shape(reshape前): {host_out.shape}")
+        # 不再 reshape，保持扁平，提高性能
 
         ret = acl.rt.free(input_dev); check_ret("acl.rt.free input", ret)
         ret = acl.destroy_data_buffer(input_buf); check_ret("acl.destroy_data_buffer input", ret)
@@ -92,7 +92,7 @@ class YOLO11NRunner:
 
 def postprocess(pred, orig_shape):
     CONF_THRESH = 0.65
-    arr = pred.reshape(1, 8400, 84)[0]
+    arr = pred.reshape(-1, 84)  # 视图，无拷贝 (8400, 84)
     detections = []
     for i in range(arr.shape[0]):
         cls_scores = arr[i, 4:]
@@ -115,9 +115,20 @@ def postprocess(pred, orig_shape):
     return list(best.values())
 
 def draw_and_save(image_rgb, detections, path):
+    if image_rgb is None or image_rgb.size == 0:
+        return
     img_bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
+    h, w = img_bgr.shape[:2]
     for det in detections:
-        x1, y1, x2, y2, _, _ = det
+        if len(det) < 4:
+            continue
+        x1, y1, x2, y2 = [int(round(v)) for v in det[:4]]
+        x1 = np.clip(x1, 0, w - 1)
+        y1 = np.clip(y1, 0, h - 1)
+        x2 = np.clip(x2, 0, w - 1)
+        y2 = np.clip(y2, 0, h - 1)
+        if x2 <= x1 or y2 <= y1:
+            continue
         cv2.rectangle(img_bgr, (x1, y1), (x2, y2), (0, 255, 0), 2)
     cv2.imwrite(path, img_bgr)
 
