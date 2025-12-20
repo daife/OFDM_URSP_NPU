@@ -78,6 +78,7 @@ class YOLO11NRunner:
         host_out = np.empty(out_sizes[0] // 4, dtype=np.float32)
         ret = acl.rt.memcpy(acl.util.bytes_to_ptr(host_out.tobytes()), out_sizes[0],
                             out_dev[0], out_sizes[0], ACL_MEMCPY_DEVICE_TO_HOST); check_ret("acl.rt.memcpy D2H", ret)
+        print(f"模型输出shape(reshape前): {host_out.shape}")
         host_out = host_out.reshape(1, 8400, 8)
 
         ret = acl.rt.free(input_dev); check_ret("acl.rt.free input", ret)
@@ -139,7 +140,6 @@ def main():
         t_pre = (time.time() - t0) * 1000
 
         pred, t_inf = runner.infer(input_tensor)
-        print(f"模型输出shape: {pred.shape}")
 
         t1 = time.time()
         detections = postprocess(pred, np_img.shape[:2])
