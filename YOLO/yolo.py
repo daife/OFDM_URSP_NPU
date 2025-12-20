@@ -75,9 +75,11 @@ class YOLO11NRunner:
         ret = acl.mdl.execute(self.model_id, input_ds, output_ds); check_ret("acl.mdl.execute", ret)
         infer_time = (time.time() - start) * 1000
 
-        host_out = np.empty(out_sizes[0] // 4, dtype=np.float32)
-        ret = acl.rt.memcpy(acl.util.numpy_to_ptr(host_out), out_sizes[0],
+        # 使用 bytearray + bytes_to_ptr，避免 numpy_to_ptr 问题
+        host_buf = bytearray(out_sizes[0])
+        ret = acl.rt.memcpy(acl.util.bytes_to_ptr(host_buf), out_sizes[0],
                             out_dev[0], out_sizes[0], ACL_MEMCPY_DEVICE_TO_HOST); check_ret("acl.rt.memcpy D2H", ret)
+        host_out = np.frombuffer(host_buf, dtype=np.float32)
         print(f"模型输出shape(reshape前): {host_out.shape}")
         # 不再 reshape，保持扁平，提高性能
 
