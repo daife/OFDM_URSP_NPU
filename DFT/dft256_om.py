@@ -52,14 +52,15 @@ def destroy_io_resources(io_res):
     ret = acl.mdl.destroy_dataset(io_res["output_ds"]); check_ret("acl.mdl.destroy_dataset output", ret)
 
 def run_acl_model(model_id, model_desc, host_x, io_res):
+    start = time.time()
     input_bytes = host_x.tobytes()
     input_ptr = acl.util.bytes_to_ptr(input_bytes)
     ret = acl.rt.memcpy(io_res["input_device"], io_res["input_size"], input_ptr,
                         io_res["input_size"], ACL_MEMCPY_HOST_TO_DEVICE); check_ret("acl.rt.memcpy H2D", ret)
 
-    start = time.time()
+    
     ret = acl.mdl.execute(model_id, io_res["input_ds"], io_res["output_ds"]); check_ret("acl.mdl.execute", ret)
-    elapsed = time.time() - start
+    
 
     out_size = io_res["out_sizes"][0]
     host_out_buf = ctypes.create_string_buffer(out_size)
@@ -68,6 +69,7 @@ def run_acl_model(model_id, model_desc, host_x, io_res):
                         out_size, ACL_MEMCPY_DEVICE_TO_HOST); check_ret("acl.rt.memcpy D2H", ret)
     host_out_bytes = acl.util.ptr_to_bytes(host_out_ptr, out_size)
     host_out = np.frombuffer(host_out_bytes, dtype=host_x.dtype).reshape(host_x.shape)
+    elapsed = time.time() - start
     return host_out, elapsed
 
 if __name__ == "__main__":

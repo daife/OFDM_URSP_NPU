@@ -5,8 +5,8 @@ from PIL import Image
 import cv2
 import ctypes
 
-MODEL_PATH = "./yolo11n.om"
-IMAGE_PATH = "./YOLO/tst.jpg"
+MODEL_PATH = "./person_yolo11n.om"
+IMAGE_PATH = "./YOLO/person.png"
 SAVE_PATH = "./YOLO/tst_out.jpg"
 MODEL_BATCH = 1
 ACL_MEM_MALLOC_NORMAL_ONLY = 0
@@ -91,15 +91,15 @@ def run_acl_model(model_id, model_desc, host_x, io_res):
                         out_size, ACL_MEMCPY_DEVICE_TO_HOST); check_ret("acl.rt.memcpy D2H", ret)
     host_out_bytes = acl.util.ptr_to_bytes(host_out_ptr, out_size)
     elem_cnt = out_size // np.dtype(np.float32).itemsize
-    if elem_cnt == 84 * 8400:
-        host_out = np.frombuffer(host_out_bytes, dtype=np.float32).reshape(1, 84, 8400)
+    if elem_cnt == 5 * 8400:
+        host_out = np.frombuffer(host_out_bytes, dtype=np.float32).reshape(1, 5, 8400)
     else:
         host_out = np.frombuffer(host_out_bytes, dtype=np.float32).reshape(1, elem_cnt)
     return host_out, infer_time
 
-def postprocess(pred, conf_thresh=0.00001, iou_thresh=0.5):
+def postprocess(pred, conf_thresh=0.0, iou_thresh=0.5):
     arr = pred
-    arr = arr.transpose(0, 2, 1)[0]   # (8400, 84)
+    arr = arr.transpose(0, 2, 1)[0]   # (8400, 5)
     conf_mask = arr[:, 4] > conf_thresh
     detections = []
     for i in range(arr.shape[0]):
@@ -194,5 +194,5 @@ def main(mode="print"):  # mode: "print" or "save"
 if __name__ == "__main__":
     # 仅打印: main("print")
     # 打印并保存: main("save")
-    main("print")
-    # main("save")
+    # main("print")
+    main("save")
