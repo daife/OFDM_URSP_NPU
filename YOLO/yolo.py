@@ -194,5 +194,5 @@ def main(mode="print"):  # mode: "print" or "save"
 if __name__ == "__main__":
     # 仅打印: main("print")
     # 打印并保存: main("save")
-    # main("print")
-    main("save")
+    main("print")
+    # main("save")
