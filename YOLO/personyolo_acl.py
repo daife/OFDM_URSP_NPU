@@ -5,7 +5,7 @@ import cv2
 import ctypes
 
 MODEL_PATH = "./person_yolo11n.om"
-IMAGE_PATH = "./YOLO/person.png"
+IMAGE_PATH = "./YOLO/f000012.jpg"
 SAVE_PATH = "./YOLO/person_out.png"
 #nms的两个参数
 CONF_THRESH=0.25 #置信度
@@ -122,15 +122,15 @@ def postprocess(pred, conf_thresh=CONF_THRESH, iou_thresh=IOU_THRESH):
 def draw_boxes(img, detections):
     for det in detections:
         x1, y1, x2, y2, score, cls_id = det
-        label = "person"
+        label = f"person {score:.2f}"
         cv2.rectangle(img, (x1, y1), (x2, y2), (0,255,0), 2)
         cv2.putText(img, label, (x1, max(y1-10, 0)), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
     return img
 
 def main(mode="print"):  # mode: "print" or "save"
     # 前处理计时
-    t0 = time.time()
     img_np = cv2.imread(IMAGE_PATH) #这里是用opencv从图片读取（bgr），换成你h265解码后的图像就行
+    t0 = time.time()
     img_input = preprocess(img_np)
     t1 = time.time()
 
